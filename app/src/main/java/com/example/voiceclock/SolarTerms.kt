@@ -9,9 +9,12 @@ import kotlin.math.sin
 /**
  * 二十四节气计算。
  *
- * 采用 Meeus《Astronomical Algorithms》的太阳视黄经近似公式（精度约 0.01°，
- * 换算到节气时刻误差通常在 1 分钟以内），对 1900-2100 年有效。
- * 节气定义为太阳视黄经达到 15° 的整倍数：小寒 285°、大寒 300°……立春 315°……冬至 270°。
+ * 采用 Meeus《Astronomical Algorithms》的太阳视黄经近似公式，
+ * 计算的是太阳视黄经达到 15° 整倍数的时刻（力学时，与实际 UTC 相差 ΔT，
+ * 2026 年约 69 秒，对日期无影响）。
+ *
+ * 注意：算出的儒略日是 **UT（世界时）**，必须换算到目标时区才能得到正确日期与时间。
+ * 未做时区换算会把北京时间错成 UTC，导致早上时段的节气日期差一天。
  *
  * 全部为纯函数，不依赖 Android 框架，可直接单元测试。
  */
@@ -45,7 +48,7 @@ object SolarTerms {
         return floor(365.25 * (y + 4716)) + floor(30.6001 * (m + 1)) + day + b - 1524.5 + ut / 24.0
     }
 
-    /** 太阳视黄经（度），jd 为力学时儒略日（此处近似使用 UTC）。 */
+    /** 太阳视黄经（度），jd 为儒略日（UT）。 */
     private fun sunLongitude(jd: Double): Double {
         val t = (jd - 2451545.0) / 36525.0
         val l0 = 280.46646 + t * (36000.76983 + t * 0.0003032)
@@ -65,7 +68,7 @@ object SolarTerms {
         return d
     }
 
-    /** 求某年太阳视黄经等于 target 的时刻（UTC 儒略日）。 */
+    /** 求某年太阳视黄经等于 target 的时刻（UT 儒略日）。 */
     private fun solve(year: Int, target: Double): Double {
         val lo = toJulianDay(year, 1, 1, 0.0)
         val hi = toJulianDay(year + 1, 1, 1, 0.0)
@@ -87,11 +90,10 @@ object SolarTerms {
             prevJd = jd
             prev = cur
         }
-        // 理论上不会发生；返回年初以避免异常。
         return lo
     }
 
-    /** 儒略日转本地时间（指定时区）。 */
+    /** 儒略日（UT）转为指定时区的本地时间。 */
     private fun toZoned(jd: Double, zone: ZoneId): ZonedDateTime {
         var z = floor(jd + 0.5)
         val f = jd + 0.5 - z
@@ -109,13 +111,18 @@ object SolarTerms {
         val year = if (month > 2) (c - 4716).toInt() else (c - 4715).toInt()
         val dayInt = floor(day).toInt()
         val dayFraction = day - dayInt
-        val startOfDay = LocalDate.of(year, month, dayInt).atStartOfDay(zone)
-        return startOfDay.plusSeconds(Math.round(dayFraction * 86400.0))
+        // dayFraction 是 UT 当日已过比例；在 UTC 时区下重建时间戳再转目标时区。
+        val utc = LocalDate.of(year, month, dayInt).atStartOfDay(java.time.ZoneOffset.UTC)
+            .plusSeconds(Math.round(dayFraction * 86400.0))
+        return utc.atZoneSameInstant(zone)
     }
 
     /** 某年第 index 个节气（0=小寒）的时刻。 */
     fun term(year: Int, index: Int, zone: ZoneId = ZoneId.systemDefault()): ZonedDateTime =
         toZoned(solve(year, targetDegree(index)), zone)
+
+    /** 某年第 index 个节气在 UTC 的时刻，供测试比对。 */
+    fun termUtc(year: Int, index: Int): ZonedDateTime = toZoned(solve(year, targetDegree(index)), ZoneId.of("UTC"))
 
     /** 某年全部 24 个节气，按时间升序。 */
     fun termsOfYear(year: Int, zone: ZoneId = ZoneId.systemDefault()): List<Pair<String, ZonedDateTime>> =
@@ -123,22 +130,16 @@ object SolarTerms {
 
     /** 节气播报信息。 */
     data class Info(
-        /** 用于播报的完整语句，例如「明天是小雪」或「距离冬至还有 7 天」。 */
         val speech: String,
-        /** 界面展示用的简短标题，例如「明日小雪」。 */
         val title: String,
-        /** 今天是否为节气当天。 */
         val isToday: Boolean
     )
 
     /**
      * 生成给定日期对应的节气播报。
-     *
-     * 规则：今天交节 → 「今天是 XX」；明天交节 → 「明天是 XX」；
-     * 否则播报距离下一个节气还有多少天。
+     * 今天交节 → 「今天是 XX」；明天交节 → 「明天是 XX」；否则播报距离下一个节气还有多少天。
      */
     fun infoFor(date: LocalDate, zone: ZoneId = ZoneId.systemDefault()): Info {
-        // 取前后两年，覆盖 12 月底到次年 1 月初的跨年情况。
         val all = (date.year - 1..date.year + 1)
             .flatMap { termsOfYear(it, zone) }
             .sortedBy { it.second }

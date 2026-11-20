@@ -13,13 +13,23 @@ import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.View
-import android.widget.*
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.Spinner
+import android.widget.Switch
+import android.widget.TextView
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var status: TextView
@@ -41,7 +51,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    /** 最近一次成功获取的天气播报文本，供试听使用。 */
+    /** 最近一次成功获取的天气播报文本，供试听拼接使用。 */
     @Volatile private var lastWeatherSpeech: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,10 +72,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         fun label(text: String, size: Float = 16f) = TextView(this).apply {
-            this.text = text; textSize = size; setPadding(0, dp(14), 0, dp(8)); root.addView(this)
+            this.text = text
+            textSize = size
+            setPadding(0, dp(14), 0, dp(8))
+            root.addView(this)
         }
         fun button(text: String, action: () -> Unit) = Button(this).apply {
-            this.text = text; setOnClickListener { action() }; root.addView(this)
+            this.text = text
+            setOnClickListener { action() }
+            root.addView(this)
         }
 
         label("语音报时播报器", 28f)
@@ -109,7 +124,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         label("锁屏播报使用系统闹钟唤醒；系统可能显示下一次闹钟标记。语音使用闹钟音量。", 14f)
         button("设置锁屏报时权限") { openAlarmPermission() }
         button("设置后台电池用量") {
-            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:$packageName")
+                )
+            )
         }
 
         label("报时模式", 20f)
@@ -127,6 +147,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 interval.visibility = if (position == 0) View.VISIBLE else View.GONE
             }
+
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
 
@@ -137,7 +158,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             group.forEachIndexed { i, name ->
                 val day = rowIndex * 4 + i + 1
                 val check = CheckBox(ctx).apply { text = name; isChecked = day in saved.days }
-                days.add(check); row.addView(check, LinearLayout.LayoutParams(0, -2, 1f))
+                days.add(check)
+                row.addView(check, LinearLayout.LayoutParams(0, -2, 1f))
             }
             root.addView(row)
         }
@@ -154,7 +176,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             val schedule = readSchedule() ?: return@button
             Settings.save(ctx, schedule)
             saveExtras()
-            if (Settings.enabled(ctx)) startService(Intent(ctx, ClockService::class.java).setAction(ClockService.RELOAD))
+            if (Settings.enabled(ctx)) {
+                startService(Intent(ctx, ClockService::class.java).setAction(ClockService.RELOAD))
+            }
             showStatus("设置已保存", schedule)
         }
         button("保存并开启语音报时") {
@@ -163,7 +187,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             saveExtras()
             if (!ClockAlarms.permitted(ctx)) {
                 status.text = "请允许“闹钟和提醒”，返回后再次点击开启，才能在锁屏时准时报播"
-                openAlarmPermission(); return@button
+                openAlarmPermission()
+                return@button
             }
             Settings.setEnabled(ctx, true)
             startForegroundService(Intent(ctx, ClockService::class.java).setAction(ClockService.START))
@@ -187,17 +212,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) = Unit
+
             override fun onDone(utteranceId: String) {
                 if (TimeSpeech.isChime(utteranceId)) return
                 previewTracker.finish(utteranceId)?.let { record ->
                     SpeechHistory(ctx).use { it.add(record) }
-                    main.post { status.text = "试听播放完成，已保存报时记录" }
+                    main.post { if (::status.isInitialized) status.text = "试听播放完成，已保存报时记录" }
                 }
             }
+
             override fun onError(utteranceId: String) {
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
-                main.post { status.text = "试听失败，请检查系统语音和提示音播放" }
+                main.post { if (::status.isInitialized) status.text = "试听失败，请检查系统语音和提示音播放" }
             }
+
             override fun onStop(utteranceId: String, interrupted: Boolean) {
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
             }
@@ -246,16 +274,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             var text = ""
             if (extras.weatherEnabled) {
                 val latch = CountDownLatch(1)
-                @Volatile var point: LocationHelper.Point? = null
+                val holder = AtomicReference<LocationHelper.Point?>(null)
                 if (extras.autoLocate && LocationHelper.hasPermission(ctx)) {
                     main.post {
                         LocationHelper.request(ctx, 6_000L) { p ->
-                            point = p
+                            holder.set(p)
                             latch.countDown()
                         }
                     }
                     try { latch.await(7, TimeUnit.SECONDS) } catch (_: InterruptedException) { }
                 }
+                val point = holder.get()
                 val lat = point?.latitude ?: extras.latitude
                 val lon = point?.longitude ?: extras.longitude
                 if (point != null && !lat.isNaN() && !lon.isNaN()) Settings.saveLocation(ctx, lat, lon)
@@ -267,7 +296,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         text = weather.speech(extras.placeName.takeIf { it.isNotBlank() })
                         Settings.saveCachedWeather(ctx, text)
                     } else {
-                        text = "天气获取失败：${result.exceptionOrNull()?.message ?: "未知错误"}"
+                        text = "天气获取失败：" + (result.exceptionOrNull()?.message ?: "未知错误")
                     }
                 } else if (!extras.autoLocate || !LocationHelper.hasPermission(ctx)) {
                     text = "未开启定位或未授权，且无缓存坐标"
@@ -283,12 +312,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     weatherLine.indexOf("未开启") < 0 &&
                     weatherLine.indexOf("未授权") < 0
                 lastWeatherSpeech = if (isRealWeather) weatherLine else null
-                val termLine = termInfo?.let { "今日节气：${it.title}（${it.speech}）" } ?: "今日节气：未开启"
-                val formattedTime = now.format(DateTimeFormatter.ofPattern("M月d日 EEEE HH:mm", Locale.SIMPLIFIED_CHINESE))
+                val termLine = if (termInfo != null) "今日节气：${termInfo.title}（${termInfo.speech}）" else "今日节气：未开启"
+                val formattedTime = now.format(
+                    DateTimeFormatter.ofPattern("M月d日 EEEE HH:mm", Locale.SIMPLIFIED_CHINESE)
+                )
+                val weatherText = if (weatherLine.isEmpty()) "未开启" else weatherLine
                 val coords = Settings.extras(ctx)
                 val coordsLine = if (coords.hasLocation)
-                    "\n坐标：" + String.format(Locale.US, "%.4f, %.4f", coords.latitude, coords.longitude) else ""
-                infoPreview.text = "时间：$formattedTime\n天气：${if (weatherLine.isEmpty()) "未开启" else weatherLine}\n$termLine$coordsLine"
+                    "\n坐标：" + String.format(Locale.US, "%.4f, %.4f", coords.latitude, coords.longitude)
+                else ""
+                if (::infoPreview.isInitialized) {
+                    infoPreview.text = "时间：$formattedTime\n天气：$weatherText\n$termLine$coordsLine"
+                }
             }
         }
     }
@@ -304,11 +339,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     if (index >= slots.size) return@setOnClickListener
                     val value = if (start) slots[index].start else slots[index].end
                     TimePickerDialog(ctx, { _, hour, minute ->
-                        if (index >= slots.size) return@TimePickerDialog
-                        val current = slots[index]
-                        slots[index] = if (start) current.copy(start = hour * 60 + minute)
-                        else current.copy(end = hour * 60 + minute)
-                        renderSlots()
+                        if (index < slots.size) {
+                            val current = slots[index]
+                            slots[index] = if (start) current.copy(start = hour * 60 + minute)
+                            else current.copy(end = hour * 60 + minute)
+                            renderSlots()
+                        }
                     }, value / 60, value % 60, true).show()
                 }
             }
@@ -318,7 +354,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             row.addView(Button(ctx).apply {
                 text = "删除"
                 setOnClickListener {
-                    if (index < slots.size) { slots.removeAt(index); renderSlots() }
+                    if (index < slots.size) {
+                        slots.removeAt(index)
+                        renderSlots()
+                    }
                 }
             })
             slotList.addView(row)
@@ -328,7 +367,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun readSchedule(): Schedule? {
         val selected = days.mapIndexedNotNull { i, check -> if (check.isChecked) i + 1 else null }.toSet()
         if (selected.isEmpty() || slots.isEmpty()) {
-            status.text = "请至少选择一天，并添加一个时段"; return null
+            status.text = "请至少选择一天，并添加一个时段"
+            return null
         }
         return Schedule(selected, slots.toList(), mode.selectedItemPosition, intervals[interval.selectedItemPosition])
     }
@@ -347,8 +387,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             speechReady = language != null && language >= TextToSpeech.LANG_AVAILABLE &&
                 tts?.let { TimeSpeech.configure(it, packageName) } == true
         }
-        if (!speechReady && speechInitialized) {
-            if (::status.isInitialized) status.text = "中文语音不可用，请在系统文字转语音设置中安装中文语音"
+        if (!speechReady && ::status.isInitialized) {
+            status.text = "中文语音不可用，请在系统文字转语音设置中安装中文语音"
         }
     }
 
@@ -367,8 +407,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     private fun openAlarmPermission() {
         if (Build.VERSION.SDK_INT >= 31 && !ClockAlarms.permitted(this)) {
-            startActivity(Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:$packageName")))
-        } else status.text = "已具备锁屏播报所需闹钟权限"
+            startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.parse("package:$packageName")
+                )
+            )
+        } else {
+            status.text = "已具备锁屏播报所需闹钟权限"
+        }
     }
 
     override fun onResume() {
@@ -377,7 +424,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (Settings.enabled(this)) {
             if (ClockAlarms.permitted(this)) {
                 startForegroundService(Intent(this, ClockService::class.java).setAction(ClockService.RESTORE))
-            } else status.text = "报时未能运行：请允许“闹钟和提醒”权限"
+            } else {
+                status.text = "报时未能运行：请允许“闹钟和提醒”权限"
+            }
         }
     }
 
@@ -388,7 +437,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         previewTracker.clear()
-        tts?.stop(); tts?.shutdown()
+        tts?.stop()
+        tts?.shutdown()
         io.shutdownNow()
         super.onDestroy()
     }

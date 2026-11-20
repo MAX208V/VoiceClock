@@ -45,8 +45,7 @@ class BroadcastTextTest {
     }
 
     @Test fun buildsReadableWeatherSpeech() {
-        val weather = WeatherClient.parse(sample)
-        assertEquals("上海，多云，气温 12 摄氏度，体感 10 度", weather.speech("上海"))
+        assertEquals("上海，多云，气温 12 摄氏度，体感 10 度", WeatherClient.parse(sample).speech("上海"))
     }
 
     @Test fun weatherSpeechOmitsPlaceWhenBlank() {
@@ -73,7 +72,8 @@ class BroadcastTextTest {
         assertEquals("现在时间，11月20日 星期五 中午12点整。", BroadcastText.timeSentence(time("2026-11-20T12:00:00")))
         assertEquals("现在时间，11月20日 星期五 凌晨5点30分。", BroadcastText.timeSentence(time("2026-11-20T05:30:00")))
         assertEquals("现在时间，11月20日 星期五 晚上9点整。", BroadcastText.timeSentence(time("2026-11-20T21:00:00")))
-        assertEquals("现在时间，11月20日 星期五 凌晨0点15分。", BroadcastText.timeSentence(time("2026-11-20T00:15:00")))
+        // 0 点按中文习惯读作「凌晨12点」
+        assertEquals("现在时间，11月20日 星期五 凌晨12点15分。", BroadcastText.timeSentence(time("2026-11-20T00:15:00")))
     }
 
     @Test fun fullBroadcastJoinsAllThreeParts() {
@@ -84,7 +84,7 @@ class BroadcastTextTest {
     }
 
     @Test fun missingTrailingFullStopIsAdded() {
-        // 防止 TTS 把「摄氏度明天是小雪」连读
+        // 防止 TTS 把「摄氏度距离冬至」连读
         val text = BroadcastText.build(
             BroadcastText.Parts(time("2026-11-20T13:01:00"), "多云，气温 12 摄氏度", "距离冬至还有 32 天")
         )

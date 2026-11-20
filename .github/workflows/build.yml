@@ -48,7 +48,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      # 根据日志中的真实构建结果判定（不用 outcome，避免 continue-on-error 掩盖失败）
+      # 根据日志中的真实内容判定，避免 continue-on-error 掩盖失败
       - name: Verify build and tests really passed
         id: verify
         run: |
@@ -56,16 +56,17 @@ jobs:
           if grep -q 'BUILD SUCCESSFUL' unit-tests.log 2>/dev/null && ! grep -q 'FAILED' unit-tests.log 2>/dev/null; then
             echo "unit tests: PASSED"
           else
-            echo "unit tests: FAILED"; ok=0
+            echo "unit tests: FAILED"
+            ok=0
           fi
           if grep -q 'BUILD SUCCESSFUL' assemble.log 2>/dev/null && ls app/build/outputs/apk/debug/*.apk >/dev/null 2>&1; then
             echo "assemble: PASSED"
             ls -lh app/build/outputs/apk/debug/*.apk
           else
-            echo "assemble: FAILED"; ok=0
+            echo "assemble: FAILED"
+            ok=0
           fi
           echo "overall=$ok"
-          echo "overall=$ok" >> "$GITHUB_OUTPUT"
           if [ "$ok" = "0" ]; then exit 1; fi
 
       - name: Publish report to ci-report branch
@@ -82,8 +83,7 @@ jobs:
           done
           find app/build/test-results -name '*.xml' -exec cp {} /tmp/report/ \; 2>/dev/null || true
           cd /tmp/report
-          tests_ok=$([ "${{ steps.steps.tests.outcome }}" = "success" ] && echo yes || echo no)
-          echo "run=$GITHUB_RUN_ID verify=${{ steps.verify.outcome }}" > STATUS.txt
+          echo "run=$GITHUB_RUN_ID verify=${{ steps.verify.outcome }} sha=$GITHUB_SHA" > STATUS.txt
           git init -q
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -1,18 +1,27 @@
 package com.example.voiceclock
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
 import android.content.Intent
-import android.os.*
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class ClockService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -31,11 +40,16 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     private var workTimeout: Runnable? = null
 
     private val speechTimeout = Runnable {
-        activeId?.let(tracker::fail)
-        activeId = null; pendingSpeech = null
+        val current = activeId
+        if (current != null) {
+            tracker.fail(current)
+            activeId = null
+        }
+        pendingSpeech = null
         tts?.stop()
         problem = "语音播放超时，请检查中文语音和后台运行设置"
-        releaseWakeLock(); updateNotification()
+        releaseWakeLock()
+        updateNotification()
     }
 
     override fun onCreate() {
@@ -47,19 +61,21 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String) = Unit
+
             override fun onDone(utteranceId: String) {
                 if (TimeSpeech.isChime(utteranceId)) return
-                tracker.finish(utteranceId)?.let { record -> SpeechHistory(this@ClockService).use { it.add(record) } }
+                tracker.finish(utteranceId)?.let { record ->
+                    SpeechHistory(this@ClockService).use { it.add(record) }
+                }
                 handler.post { finished(utteranceId, null) }
             }
+
             override fun onError(utteranceId: String) {
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
-                handler.post {
-                    if (activeId == id && TimeSpeech.isChime(utteranceId)) tts?.stop()
-                    finished(id, "报时失败，请检查系统语音和提示音播放")
-                }
+                handler.post { finished(id, "报时失败，请检查系统语音和提示音播放") }
             }
+
             override fun onStop(utteranceId: String, interrupted: Boolean) {
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
@@ -77,24 +93,37 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         val prefs = getSharedPreferences("settings", MODE_PRIVATE)
         val reset = intent?.action == START || intent?.action == RELOAD
         val savedAnchor = prefs.getLong("anchor", 0)
-        val anchor = if (reset || savedAnchor == 0L) now else Instant.ofEpochMilli(savedAnchor).atZone(ZoneId.systemDefault())
-        if (reset || savedAnchor == 0L) prefs.edit().putLong("anchor", anchor.toInstant().toEpochMilli()).apply()
+        val anchor = if (reset || savedAnchor == 0L) now
+        else Instant.ofEpochMilli(savedAnchor).atZone(ZoneId.systemDefault())
+        if (reset || savedAnchor == 0L) {
+            prefs.edit().putLong("anchor", anchor.toInstant().toEpochMilli()).apply()
+        }
         val alarmDue = intent?.getLongExtra("due", 0) ?: 0
-        val validAlarm = intent?.action == ALARM && alarmDue != 0L && alarmDue == next?.toInstant()?.toEpochMilli() && !now.isBefore(next)
+        val knownNext = next
+        val validAlarm = intent?.action == ALARM && alarmDue != 0L && knownNext != null &&
+            alarmDue == knownNext.toInstant().toEpochMilli() && !now.isBefore(knownNext)
         val speak = (intent?.action == START || validAlarm) && schedule.allows(now)
         // Ignore old alarm deliveries after stop/reload and consume a due alarm only once.
-        if (reset || validAlarm || next == null || !next!!.isAfter(now) || intent?.action == RESCHEDULE) {
+        val nextRun = next
+        if (reset || validAlarm || nextRun == null || !nextRun.isAfter(now) || intent?.action == RESCHEDULE) {
             next = schedule.next(now, anchor)
         }
         // Re-register even a future persisted alarm: package updates or OS cleanup may have removed it.
         if (!ClockAlarms.schedule(this, next)) {
-            next = null; problem = "请打开应用，允许“闹钟和提醒”权限后恢复报时"
-        } else problem = null
+            next = null
+            problem = "请打开应用，允许“闹钟和提醒”权限后恢复报时"
+        } else {
+            problem = null
+        }
         if (speak) {
             holdForSpeech()
             pendingSpeech = if (intent?.action == START) "开启报时" else "自动报时"
-            if (ready) announce() else if (initialized) {
-                pendingSpeech = null; problem = "中文语音不可用，请检查系统语音设置"; releaseWakeLock()
+            if (ready) {
+                announce()
+            } else if (initialized) {
+                pendingSpeech = null
+                problem = "中文语音不可用，请检查系统语音设置"
+                releaseWakeLock()
             }
         }
         updateNotification()
@@ -109,14 +138,20 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 tts?.let { TimeSpeech.configure(it, packageName) } == true
         }
         if (pendingSpeech != null) {
-            if (ready) announce() else { pendingSpeech = null; problem = "中文语音不可用，请检查系统语音设置"; releaseWakeLock() }
+            if (ready) {
+                announce()
+            } else {
+                pendingSpeech = null
+                problem = "中文语音不可用，请检查系统语音设置"
+                releaseWakeLock()
+            }
         }
         updateNotification()
     }
 
     /**
-     * 播报。先在后台线程取天气（带超时），再拼装文案并送到 TTS。
-     * 天气失败不会阻断报时：仍播报时间与节气。
+     * 播报：先在后台线程取天气（带超时），再拼装「时间 + 天气 + 节气」并送入 TTS。
+     * 天气失败不会阻断报时，仍播报时间与节气。
      */
     private fun announce() {
         val source = pendingSpeech ?: return
@@ -128,7 +163,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         val token = ++buildToken
         val extras = Settings.extras(this)
 
-        // 整体超时兜底：定位+网络不应无限等待
+        // 整体超时兜底：定位 + 网络不应无限等待。
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
                 speakText(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now)
@@ -162,13 +197,19 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         // 自动定位：缓存超过 3 小时或从未定位时重新定位
         val stale = System.currentTimeMillis() - Settings.locationTimestamp(this) > 3 * 3600_000L
         if (extras.autoLocate && LocationHelper.hasPermission(this) && (stale || !extras.hasLocation)) {
-            val latch = java.util.concurrent.CountDownLatch(1)
-            var point: LocationHelper.Point? = null
-            handler.post { LocationHelper.request(this, 6_000L) { p -> point = p; latch.countDown() } }
-            try { latch.await(7, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) { }
+            val latch = CountDownLatch(1)
+            val holder = AtomicReference<LocationHelper.Point?>(null)
+            handler.post {
+                LocationHelper.request(this, 6_000L) { p ->
+                    holder.set(p)
+                    latch.countDown()
+                }
+            }
+            try { latch.await(7, TimeUnit.SECONDS) } catch (_: InterruptedException) { }
+            val point = holder.get()
             if (point != null) {
-                lat = point!!.latitude
-                lon = point!!.longitude
+                lat = point.latitude
+                lon = point.longitude
                 Settings.saveLocation(this, lat, lon)
             }
         }
@@ -190,13 +231,16 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         val id = tracker.begin(SpeechRecord(now, text, source))
         activeId = id
         if (TimeSpeech.speak(tts, text, id) != TextToSpeech.SUCCESS) {
-            tracker.fail(id); finished(id, "报时失败，请检查系统中文语音设置")
+            tracker.fail(id)
+            finished(id, "报时失败，请检查系统中文语音设置")
         }
     }
 
     private fun holdForSpeech() {
         releaseWakeLock()
-        wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "voiceclock:speech").apply { acquire(90_000) }
+        wakeLock = getSystemService(PowerManager::class.java)
+            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "voiceclock:speech")
+            .apply { acquire(90_000) }
         handler.postDelayed(speechTimeout, 80_000)
     }
 
@@ -208,7 +252,11 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
 
     private fun finished(id: String, error: String?) {
         if (id != activeId) return
-        activeId = null; problem = error; workTimeout?.let { handler.removeCallbacks(it) }; releaseWakeLock(); updateNotification()
+        activeId = null
+        problem = error
+        workTimeout?.let { handler.removeCallbacks(it) }
+        releaseWakeLock()
+        updateNotification()
     }
 
     private fun updateNotification() {
@@ -216,23 +264,35 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     }
 
     private fun notification(): Notification {
-        val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val detail = problem ?: if (!ready) "正在准备中文语音；如无声音请检查系统语音设置" else
-            "下次：${next?.format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) ?: "没有可用时间"}"
-        return Notification.Builder(this, "voice_clock").setContentTitle("语音报时已开启")
-            .setContentText(detail).setStyle(Notification.BigTextStyle().bigText("${Schedule.modes[schedule.mode]} · $detail"))
-            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentIntent(pending).setOngoing(true).build()
+        val pending = PendingIntent.getActivity(
+            this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
+        )
+        val nextText = next?.format(DateTimeFormatter.ofPattern("M月d日 HH:mm")) ?: "没有可用时间"
+        val detail = problem ?: if (!ready) "正在准备中文语音；如无声音请检查系统语音设置"
+        else "下次：$nextText"
+        return Notification.Builder(this, "voice_clock")
+            .setContentTitle("语音报时已开启")
+            .setContentText(detail)
+            .setStyle(Notification.BigTextStyle().bigText("${Schedule.modes[schedule.mode]} · $detail"))
+            .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
+            .setContentIntent(pending)
+            .setOngoing(true)
+            .build()
     }
 
     override fun onDestroy() {
-        tracker.clear(); handler.removeCallbacksAndMessages(null); releaseWakeLock()
+        tracker.clear()
+        handler.removeCallbacksAndMessages(null)
+        releaseWakeLock()
         io.shutdownNow()
-        tts?.stop(); tts?.shutdown(); tts = null
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
         // Keep the system alarm when Android reclaims the service; explicit stop cancels it in the UI.
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?) = null
+    override fun onBind(intent: Intent?): IBinder? = null
 
     companion object {
         const val START = "com.example.voiceclock.START"

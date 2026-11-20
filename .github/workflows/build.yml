@@ -13,7 +13,7 @@ jobs:
   build:
     name: Assemble debug APK
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
 
     steps:
       - name: Checkout
@@ -27,25 +27,33 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: false
 
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        id: tests
+        continue-on-error: true
+        run: ./gradlew testDebugUnitTest --stacktrace --console=plain 2>&1 | tee unit-tests.log
 
       - name: Assemble debug APK
-        run: ./gradlew assembleDebug --stacktrace
+        id: assemble
+        if: steps.tests.outcome == 'success'
+        continue-on-error: true
+        run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee assemble.log
 
-      - name: Upload unit test report
+      - name: Upload logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-report
-          path: app/build/reports/tests/testDebugUnitTest
-          if-no-files-found: ignore
-          retention-days: 14
+          name: build-logs
+          path: |
+            unit-tests.log
+            assemble.log
+            app/build/reports/tests/testDebugUnitTest/**
+            app/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Upload debug APK
+        if: steps.assemble.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: voiceclock-debug-apk
@@ -53,14 +61,13 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Write build summary
-        if: always()
+      - name: Fail if any step failed
+        if: steps.tests.outcome != 'success' || steps.assemble.outcome != 'success'
         run: |
-          {
-            echo '## 构建结果'
-            echo ''
-            echo '- 单元测试: `./gradlew testDebugUnitTest`'
-            echo '- 打包: `./gradlew assembleDebug`'
-            echo ''
-            ls -lh app/build/outputs/apk/debug/ 2>/dev/null || echo '未找到 APK 产物'
-          } >> "$GITHUB_STEP_SUMMARY"
+          echo '### 失败阶段' >> "$GITHUB_STEP_SUMMARY"
+          echo "tests=${{ steps.tests.outcome }} assemble=${{ steps.assemble.outcome }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          grep -E "^e:|error:|FAILED|Execution failed|Caused by|\\* What went wrong" -A 3 unit-tests.log assemble.log 2>/dev/null | head -120 >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit 1

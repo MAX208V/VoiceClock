@@ -27,7 +27,7 @@ object BroadcastText {
         val sentences = mutableListOf<String>()
         sentences.add(ensureEnd(timeSentence(parts.time)))
         parts.weatherSpeech?.takeIf { it.isNotBlank() }
-            ?.let { sentences.add(ensureEnd("天气，${it.trim()}")) }
+            ?.let { sentences.add(ensureEnd("天气，" + it.trim())) }
         parts.solarTermSpeech?.takeIf { it.isNotBlank() }
             ?.let { sentences.add(ensureEnd(it.trim())) }
         return sentences.joinToString("")
@@ -36,8 +36,9 @@ object BroadcastText {
     /** 确保句子以中文句号结尾，避免 TTS 把两句连读成一个词。 */
     private fun ensureEnd(sentence: String): String {
         val trimmed = sentence.trim()
-        return if (trimmed.isEmpty() || trimmed.endsWith("。") || trimmed.endsWith("！") || trimmed.endsWith("？")) trimmed
-        else "$trimmed。"
+        if (trimmed.isEmpty()) return trimmed
+        val ends = trimmed.endsWith("。") || trimmed.endsWith("！") || trimmed.endsWith("？")
+        return if (ends) trimmed else trimmed + "。"
     }
 
     /** 时间语句：现在时间，11月20日 星期五 下午1点1分。 */
@@ -57,13 +58,14 @@ object BroadcastText {
             time.hour > 12 -> time.hour - 12
             else -> time.hour
         }
-        val minute = if (time.minute == 0) "整" else "${time.minute}分"
-        return "现在时间，${time.monthValue}月${time.dayOfMonth}日 $weekday $period$hour12点$minute。"
+        val minutePart = if (time.minute == 0) "整" else "${time.minute}分"
+        // 变量后直接跟中文时，必须用 ${} 明确边界，否则会被当成标识符一部分。
+        return "现在时间，${time.monthValue}月${time.dayOfMonth}日 ${weekday} ${period}${hour12}点${minutePart}。"
     }
 
     /** 试听用的简短时间语句。 */
     fun shortTime(time: ZonedDateTime): String {
-        val minute = if (time.minute == 0) "整" else "${time.minute}分"
-        return "现在时间，${time.hour}点$minute"
+        val minutePart = if (time.minute == 0) "整" else "${time.minute}分"
+        return "现在时间，${time.hour}点${minutePart}"
     }
 }

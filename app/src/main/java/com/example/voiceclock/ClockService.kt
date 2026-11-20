@@ -6,10 +6,13 @@ import android.os.*
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class ClockService : Service(), TextToSpeech.OnInitListener {
     private var tts: TextToSpeech? = null
@@ -23,6 +26,10 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     private val tracker = SpeechTracker()
     private var activeId: String? = null
     private var problem: String? = null
+    private val io: ExecutorService = Executors.newSingleThreadExecutor()
+    private var buildToken = 0
+    private var workTimeout: Runnable? = null
+
     private val speechTimeout = Runnable {
         activeId?.let(tracker::fail)
         activeId = null; pendingSpeech = null
@@ -107,36 +114,107 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         updateNotification()
     }
 
+    /**
+     * 播报。先在后台线程取天气（带超时），再拼装文案并送到 TTS。
+     * 天气失败不会阻断报时：仍播报时间与节气。
+     */
     private fun announce() {
         val source = pendingSpeech ?: return
         pendingSpeech = null
         val now = ZonedDateTime.now()
         if (!schedule.allows(now)) { releaseWakeLock(); return }
         activeId?.let(tracker::fail)
-        val text = "现在时间，${now.hour}点${now.minute}分"
+        activeId = null
+        val token = ++buildToken
+        val extras = Settings.extras(this)
+
+        // 整体超时兜底：定位+网络不应无限等待
+        val timeout = Runnable {
+            if (token == buildToken && activeId == null) {
+                speakText(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now)
+            }
+        }
+        workTimeout = timeout
+        handler.postDelayed(timeout, 12_000)
+
+        io.execute {
+            val weather = if (extras.weatherEnabled) resolveWeather(extras) else null
+            handler.post {
+                if (token != buildToken) return@post
+                workTimeout?.let { handler.removeCallbacks(it) }
+                if (activeId != null) return@post
+                val text = BroadcastText.build(BroadcastText.Parts(now, weather, solarTerm(extras, now)))
+                speakText(text, source, now)
+            }
+        }
+    }
+
+    private fun solarTerm(extras: Extras, now: ZonedDateTime): String? {
+        if (!extras.solarTermEnabled) return null
+        return SolarTerms.infoFor(now.toLocalDate(), now.zone).speech
+    }
+
+    /** 在后台线程调用。返回天气播报文本，失败时回退到缓存。 */
+    private fun resolveWeather(extras: Extras): String? {
+        var lat = extras.latitude
+        var lon = extras.longitude
+
+        // 自动定位：缓存超过 3 小时或从未定位时重新定位
+        val stale = System.currentTimeMillis() - Settings.locationTimestamp(this) > 3 * 3600_000L
+        if (extras.autoLocate && LocationHelper.hasPermission(this) && (stale || !extras.hasLocation)) {
+            val latch = java.util.concurrent.CountDownLatch(1)
+            var point: LocationHelper.Point? = null
+            handler.post { LocationHelper.request(this, 6_000L) { p -> point = p; latch.countDown() } }
+            try { latch.await(7, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) { }
+            if (point != null) {
+                lat = point!!.latitude
+                lon = point!!.longitude
+                Settings.saveLocation(this, lat, lon)
+            }
+        }
+
+        if (lat.isNaN() || lon.isNaN()) {
+            return Settings.cachedWeather(this).takeIf { it.isNotBlank() }
+        }
+
+        val result = WeatherClient.fetch(lat, lon)
+        return result.getOrNull()?.let { weather ->
+            val speech = weather.speech(extras.placeName.takeIf { it.isNotBlank() })
+            Settings.saveCachedWeather(this, speech)
+            speech
+        } ?: Settings.cachedWeather(this).takeIf { it.isNotBlank() }
+    }
+
+    private fun speakText(text: String, source: String, now: ZonedDateTime) {
+        if (activeId != null) return
         val id = tracker.begin(SpeechRecord(now, text, source))
         activeId = id
         if (TimeSpeech.speak(tts, text, id) != TextToSpeech.SUCCESS) {
             tracker.fail(id); finished(id, "报时失败，请检查系统中文语音设置")
         }
     }
+
     private fun holdForSpeech() {
         releaseWakeLock()
-        wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "voiceclock:speech").apply { acquire(60_000) }
-        handler.postDelayed(speechTimeout, 55_000)
+        wakeLock = getSystemService(PowerManager::class.java).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "voiceclock:speech").apply { acquire(90_000) }
+        handler.postDelayed(speechTimeout, 80_000)
     }
+
     private fun releaseWakeLock() {
         handler.removeCallbacks(speechTimeout)
         if (wakeLock?.isHeld == true) wakeLock?.release()
         wakeLock = null
     }
+
     private fun finished(id: String, error: String?) {
         if (id != activeId) return
-        activeId = null; problem = error; releaseWakeLock(); updateNotification()
+        activeId = null; problem = error; workTimeout?.let { handler.removeCallbacks(it) }; releaseWakeLock(); updateNotification()
     }
+
     private fun updateNotification() {
         if (Settings.enabled(this)) getSystemService(NotificationManager::class.java).notify(1, notification())
     }
+
     private fun notification(): Notification {
         val pending = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val detail = problem ?: if (!ready) "正在准备中文语音；如无声音请检查系统语音设置" else
@@ -145,13 +223,17 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             .setContentText(detail).setStyle(Notification.BigTextStyle().bigText("${Schedule.modes[schedule.mode]} · $detail"))
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm).setContentIntent(pending).setOngoing(true).build()
     }
+
     override fun onDestroy() {
         tracker.clear(); handler.removeCallbacksAndMessages(null); releaseWakeLock()
+        io.shutdownNow()
         tts?.stop(); tts?.shutdown(); tts = null
         // Keep the system alarm when Android reclaims the service; explicit stop cancels it in the UI.
         super.onDestroy()
     }
+
     override fun onBind(intent: Intent?) = null
+
     companion object {
         const val START = "com.example.voiceclock.START"
         const val RELOAD = "com.example.voiceclock.RELOAD"

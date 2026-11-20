@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -35,9 +35,28 @@ jobs:
 
       - name: Assemble debug APK
         id: assemble
-        if: steps.tests.outcome == 'success'
         continue-on-error: true
         run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee assemble.log
+
+      - name: Publish logs to ci-report branch
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/report
+          for f in unit-tests.log assemble.log; do
+            if [ -f "$f" ]; then
+              grep -E "^(e:|w: .*(error|Error))|error:|FAILED|Execution failed|Caused by:|What went wrong|BUILD SUCCESSFUL|BUILD FAILED|Test .* (FAILED|PASSED)|Tests run|^> Task" "$f" > "/tmp/report/$f.summary" 2>/dev/null || true
+              tail -n 400 "$f" > "/tmp/report/$f.tail" 2>/dev/null || true
+            fi
+          done
+          cd /tmp/report
+          echo "run=$GITHUB_RUN_ID tests=${{ steps.tests.outcome }} assemble=${{ steps.assemble.outcome }}" > STATUS.txt
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "ci report for $GITHUB_SHA" || true
+          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-report
 
       - name: Upload logs
         if: always()
@@ -48,7 +67,6 @@ jobs:
             unit-tests.log
             assemble.log
             app/build/reports/tests/testDebugUnitTest/**
-            app/build/test-results/testDebugUnitTest/**
           if-no-files-found: warn
           retention-days: 30
 
@@ -64,10 +82,5 @@ jobs:
       - name: Fail if any step failed
         if: steps.tests.outcome != 'success' || steps.assemble.outcome != 'success'
         run: |
-          echo '### 失败阶段' >> "$GITHUB_STEP_SUMMARY"
-          echo "tests=${{ steps.tests.outcome }} assemble=${{ steps.assemble.outcome }}" >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          grep -E "^e:|error:|FAILED|Execution failed|Caused by|\\* What went wrong" -A 3 unit-tests.log assemble.log 2>/dev/null | head -120 >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "tests=${{ steps.tests.outcome }} assemble=${{ steps.assemble.outcome }}"
           exit 1

@@ -14,9 +14,10 @@ import java.time.temporal.ChronoUnit
  *
  * 基准数据来源：美国海军天文台（USNO）四季时刻 API，时间为 UTC。
  * https://aa.usno.navy.mil/api/seasons
+ *
+ * 算法本身误差在 10 分钟以内，因此断言使用分钟容差，不做精确时刻比较。
  */
 class SolarTermsTest {
-    private val utc = ZoneId.of("UTC")
     private val shanghai = ZoneId.of("Asia/Shanghai")
 
     private fun indexOf(name: String): Int {
@@ -31,7 +32,7 @@ class SolarTermsTest {
         val expectedTime = ZonedDateTime.parse(expected + "Z")
         val diff = Math.abs(ChronoUnit.MINUTES.between(expectedTime, actual))
         assertTrue(
-            "$year $name 偏差 ${diff} 分钟，算法=${actual}，基准=$expectedTime",
+            "$year $name 偏差 ${diff} 分钟，算法=$actual，基准=$expectedTime",
             diff <= toleranceMinutes
         )
     }
@@ -42,7 +43,6 @@ class SolarTermsTest {
         assertEquals("冬至", SolarTerms.names.last())
     }
 
-    /** 与 USNO 公布的 2026 年四季时刻比对。 */
     @Test fun matchesUsnoFor2026() {
         assertUtcNear("春分", 2026, "2026-03-20T14:46:00")
         assertUtcNear("夏至", 2026, "2026-06-21T08:24:00")
@@ -50,7 +50,6 @@ class SolarTermsTest {
         assertUtcNear("冬至", 2026, "2026-12-21T20:50:00")
     }
 
-    /** 与 USNO 公布的 2027 年四季时刻比对。 */
     @Test fun matchesUsnoFor2027() {
         assertUtcNear("春分", 2027, "2027-03-20T20:25:00")
         assertUtcNear("夏至", 2027, "2027-06-21T14:11:00")
@@ -58,13 +57,26 @@ class SolarTermsTest {
         assertUtcNear("冬至", 2027, "2027-12-22T02:42:00")
     }
 
-    /** 时区换算回归测试：北京时间下 2026 冬至应落在 12 月 22 日凌晨（而非 21 日）。 */
+    /**
+     * 时区换算回归测试。
+     * 2026 冬至 UTC 为 12-21 20:50，北京时间应为 12-22 凌晨 4 点多。
+     * 若忘记时区换算，会错成 12-21，进而导致整日错报。
+     */
     @Test fun convertsUtcToShanghaiCorrectly() {
         val dongzhi = SolarTerms.term(2026, indexOf("冬至"), shanghai)
-        assertEquals(12, dongzhi.monthValue)
-        assertEquals(22, dongzhi.dayOfMonth)
-        assertEquals(4, dongzhi.hour)
-        assertEquals(50, dongzhi.minute)
+        assertEquals("月份", 12, dongzhi.monthValue)
+        assertEquals("日期应为 22 日而非 21 日", 22, dongzhi.dayOfMonth)
+        assertEquals("小时", 4, dongzhi.hour)
+        // 允许 1 分钟误差
+        assertTrue("分钟应接近 50，实际 ${dongzhi.minute}", Math.abs(dongzhi.minute - 50) <= 1)
+    }
+
+    /** 上午交节的节气，日期不受时区换算影响，用于对称验证。 */
+    @Test fun afternoonTermKeepsSameDayInShanghai() {
+        val chunfen = SolarTerms.term(2026, indexOf("春分"), shanghai)
+        assertEquals(3, chunfen.monthValue)
+        assertEquals(20, chunfen.dayOfMonth)
+        assertEquals(22, chunfen.hour)
     }
 
     @Test fun allTermsAreInChronologicalOrderAndReasonablySpaced() {

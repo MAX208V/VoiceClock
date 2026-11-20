@@ -29,15 +29,16 @@ object WeatherClient {
 
         /** 适合播报的一句话。 */
         fun speech(place: String?): String {
-            val prefix = if (place.isNullOrBlank()) "" else "$place"
             val temp = temperature.toInt()
-            val night = if (!isDay) "夜间" else ""
             val builder = StringBuilder()
-            if (prefix.isNotEmpty()) builder.append(prefix).append('，')
-            builder.append("${night}${description}，气温 $temp 摄氏度")
+            if (!place.isNullOrBlank()) builder.append(place).append('，')
+            builder.append(description)
+            // 夜间只在晴朗类天气前加修饰，避免「夜间中雨」这种别扭表达。
+            if (!isDay && weatherCode in 0..3) builder.append("（夜间）")
+            builder.append("，气温 ").append(temp).append(" 摄氏度")
             val feels = apparentTemperature.toInt()
-            if (feels != temp) builder.append("，体感 $feels 度")
-            if (precipitation > 0.0) builder.append("，降水量 ${format1(precipitation)} 毫米")
+            if (feels != temp) builder.append("，体感 ").append(feels).append(" 度")
+            if (precipitation > 0.0) builder.append("，降水量 ").append(format1(precipitation)).append(" 毫米")
             return builder.toString()
         }
     }
@@ -72,13 +73,13 @@ object WeatherClient {
     }
 
     /**
-     * 查询当前天气。失败返回 null，并附带可读错误信息。
+     * 查询当前天气。失败返回 failure，并附带可读错误信息。
      * 必须在后台线程调用（内部为阻塞 IO）。
      */
     fun fetch(latitude: Double, longitude: Double, timeoutMillis: Int = 8000): Result<Weather> {
         val url = "https://api.open-meteo.com/v1/forecast" +
-            "?latitude=${format6(latitude)}" +
-            "&longitude=${format6(longitude)}" +
+            "?latitude=${format4(latitude)}" +
+            "&longitude=${format4(longitude)}" +
             "&current=temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,is_day" +
             "&timezone=auto"
         var connection: HttpURLConnection? = null
@@ -103,15 +104,16 @@ object WeatherClient {
         }
     }
 
-    private fun format6(value: Double) = String.format(Locale.US, "%.4f", value)
+    private fun format4(value: Double) = String.format(Locale.US, "%.4f", value)
 
     /** 解析 Open-Meteo 响应。独立出来便于单元测试。 */
     fun parse(body: String): Weather {
         val root = JSONObject(body)
         val current = root.getJSONObject("current")
+        val temperature = current.getDouble("temperature_2m")
         return Weather(
-            temperature = current.getDouble("temperature_2m"),
-            apparentTemperature = current.optDouble("apparent_temperature", current.getDouble("temperature_2m")),
+            temperature = temperature,
+            apparentTemperature = current.optDouble("apparent_temperature", temperature),
             humidity = current.optInt("relative_humidity_2m", 0),
             precipitation = current.optDouble("precipitation", 0.0),
             weatherCode = current.optInt("weather_code", -1),

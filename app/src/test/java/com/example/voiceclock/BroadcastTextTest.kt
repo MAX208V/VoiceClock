@@ -7,7 +7,6 @@ import java.time.ZonedDateTime
 
 /** 校验天气解析与播报文案拼装。 */
 class BroadcastTextTest {
-    private val zone = ZoneId.of("Asia/Shanghai")
     private fun time(value: String) = ZonedDateTime.parse(value + "+08:00[Asia/Shanghai]")
 
     // ---------- 天气解析 ----------
@@ -48,8 +47,7 @@ class BroadcastTextTest {
 
     @Test fun buildsReadableWeatherSpeech() {
         val weather = WeatherClient.parse(sample)
-        val speech = weather.speech("上海")
-        assertEquals("上海，多云，气温 12 摄氏度，体感 10 度", speech)
+        assertEquals("上海，多云，气温 12 摄氏度，体感 10 度", weather.speech("上海"))
     }
 
     @Test fun weatherSpeechOmitsPlaceWhenBlank() {
@@ -58,36 +56,44 @@ class BroadcastTextTest {
         assertTrue(weather.speech("").startsWith("多云"))
     }
 
-    @Test fun weatherSpeechMentionsNightAndRain() {
+    @Test fun weatherSpeechMentionsNightRainAndPrecipitation() {
         val night = """{"current":{"temperature_2m":8.0,"apparent_temperature":8.0,"precipitation":2.5,"weather_code":63,"is_day":0}}"""
         val speech = WeatherClient.parse(night).speech(null)
-        assertTrue(speech, speech.contains("夜间"))
-        assertTrue(speech, speech.contains("中雨"))
-        assertTrue(speech, speech.contains("2.5 毫米"))
+        // 降水类天气不应加白天/夜间修饰
+        assertEquals("中雨，气温 8 摄氏度，降水量 2.5 毫米", speech)
+    }
+
+    @Test fun clearNightWeatherIsMarked() {
+        val night = """{"current":{"temperature_2m":18.0,"apparent_temperature":18.0,"weather_code":0,"is_day":0}}"""
+        assertEquals("晴（夜间），气温 18 摄氏度", WeatherClient.parse(night).speech(null))
     }
 
     // ---------- 文案拼装 ----------
 
     @Test fun timeSentenceIncludesDateWeekdayAndPeriod() {
-        assertEquals("现在时间，11月20日 星期五 下午1点01分。", BroadcastText.timeSentence(time("2026-11-20T13:01:00")))
+        assertEquals("现在时间，11月20日 星期五 下午1点1分。", BroadcastText.timeSentence(time("2026-11-20T13:01:00")))
         assertEquals("现在时间，11月20日 星期五 中午12点整。", BroadcastText.timeSentence(time("2026-11-20T12:00:00")))
         assertEquals("现在时间，11月20日 星期五 凌晨5点30分。", BroadcastText.timeSentence(time("2026-11-20T05:30:00")))
         assertEquals("现在时间，11月20日 星期五 晚上9点整。", BroadcastText.timeSentence(time("2026-11-20T21:00:00")))
+        assertEquals("现在时间，11月20日 星期五 上午0点15分。", BroadcastText.timeSentence(time("2026-11-20T00:15:00")))
     }
 
     @Test fun fullBroadcastJoinsAllThreeParts() {
         val text = BroadcastText.build(
             BroadcastText.Parts(time("2026-11-20T13:01:00"), "多云，气温 12 摄氏度", "明天是小雪")
         )
-        assertEquals("现在时间，11月20日 星期五 下午1点01分。天气，多云，气温 12 摄氏度。明天是小雪。", text)
+        assertEquals("现在时间，11月20日 星期五 下午1点1分。天气，多云，气温 12 摄氏度。明天是小雪。", text)
     }
 
     @Test fun missingPartsAreSkipped() {
-        val onlyTime = BroadcastText.build(BroadcastText.Parts(time("2026-11-20T13:01:00"), null, null))
-        assertEquals("现在时间，11月20日 星期五 下午1点01分。", onlyTime)
-
-        val blank = BroadcastText.build(BroadcastText.Parts(time("2026-11-20T13:01:00"), "  ", ""))
-        assertEquals("现在时间，11月20日 星期五 下午1点01分。", blank)
+        assertEquals(
+            "现在时间，11月20日 星期五 下午1点1分。",
+            BroadcastText.build(BroadcastText.Parts(time("2026-11-20T13:01:00"), null, null))
+        )
+        assertEquals(
+            "现在时间，11月20日 星期五 下午1点1分。",
+            BroadcastText.build(BroadcastText.Parts(time("2026-11-20T13:01:00"), "  ", ""))
+        )
     }
 
     @Test fun shortTimeIsCompact() {

@@ -19,9 +19,17 @@ android {
         applicationId = "com.example.voiceclock"
         minSdk = 26
         targetSdk = 35
-        versionCode = 6
-        versionName = "1.1.3"
+        versionCode = 7
+        versionName = "2.0.0"
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 }
 
-dependencies { testImplementation("junit:junit:4.13.2") }
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    // org.json 在单元测试（JVM）中无实现，测试环境需要真实实现
+    testImplementation("org.json:json:20240303")
+}

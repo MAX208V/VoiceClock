@@ -28,6 +28,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
+      # 测试失败时记录状态但不中断，以便继续打包并在末尾统一判定
       - name: Unit tests
         id: tests
         continue-on-error: true
@@ -38,30 +39,6 @@ jobs:
         continue-on-error: true
         run: ./gradlew assembleDebug --stacktrace --console=plain 2>&1 | tee assemble.log
 
-      - name: Publish logs to ci-report branch
-        if: always()
-        continue-on-error: true
-        run: |
-          mkdir -p /tmp/report
-          for f in unit-tests.log assemble.log; do
-            if [ -f "$f" ]; then
-              grep -E "^(e:|w: .*(error|Error))|error:|FAILED|Execution failed|Caused by:|What went wrong|BUILD SUCCESSFUL|BUILD FAILED|Test .* (FAILED|PASSED)|Tests run|AssertionError|expected:|at com\.example" "$f" > "/tmp/report/$f.summary" 2>/dev/null || true
-              tail -n 200 "$f" > "/tmp/report/$f.tail" 2>/dev/null || true
-            fi
-          done
-          # 收集测试报告 XML（包含真实的 expected/actual）
-          find app/build/test-results -name '*.xml' -exec cp {} /tmp/report/ \; 2>/dev/null || true
-          # 收集诊断输出（可能位于仓库根、app 目录或模块目录）
-          find . -maxdepth 3 -name 'solar-terms-dump.txt' -exec cp {} /tmp/report/ \; 2>/dev/null || true
-          cd /tmp/report
-          echo "run=$GITHUB_RUN_ID tests=${{ steps.tests.outcome }} assemble=${{ steps.assemble.outcome }}" > STATUS.txt
-          git init -q
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "ci report for $GITHUB_SHA" || true
-          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-report
-
       - name: Upload debug APK
         if: steps.assemble.outcome == 'success'
         uses: actions/upload-artifact@v4
@@ -71,8 +48,45 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Fail if any step failed
-        if: steps.tests.outcome != 'success'
+      # 根据日志中的真实构建结果判定（不用 outcome，避免 continue-on-error 掩盖失败）
+      - name: Verify build and tests really passed
+        id: verify
         run: |
-          echo "unit tests failed: ${{ steps.tests.outcome }}"
-          exit 1
+          ok=1
+          if grep -q 'BUILD SUCCESSFUL' unit-tests.log 2>/dev/null && ! grep -q 'FAILED' unit-tests.log 2>/dev/null; then
+            echo "unit tests: PASSED"
+          else
+            echo "unit tests: FAILED"; ok=0
+          fi
+          if grep -q 'BUILD SUCCESSFUL' assemble.log 2>/dev/null && ls app/build/outputs/apk/debug/*.apk >/dev/null 2>&1; then
+            echo "assemble: PASSED"
+            ls -lh app/build/outputs/apk/debug/*.apk
+          else
+            echo "assemble: FAILED"; ok=0
+          fi
+          echo "overall=$ok"
+          echo "overall=$ok" >> "$GITHUB_OUTPUT"
+          if [ "$ok" = "0" ]; then exit 1; fi
+
+      - name: Publish report to ci-report branch
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p /tmp/report
+          for f in unit-tests.log assemble.log; do
+            if [ -f "$f" ]; then
+              grep -E "^(e:|error:)|FAILED|BUILD SUCCESSFUL|BUILD FAILED|AssertionError|Tests run" "$f" \
+                > "/tmp/report/$f.summary" 2>/dev/null || true
+              tail -n 120 "$f" > "/tmp/report/$f.tail" 2>/dev/null || true
+            fi
+          done
+          find app/build/test-results -name '*.xml' -exec cp {} /tmp/report/ \; 2>/dev/null || true
+          cd /tmp/report
+          tests_ok=$([ "${{ steps.steps.tests.outcome }}" = "success" ] && echo yes || echo no)
+          echo "run=$GITHUB_RUN_ID verify=${{ steps.verify.outcome }}" > STATUS.txt
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "ci report for $GITHUB_SHA" || true
+          git push -f -q "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" HEAD:ci-report

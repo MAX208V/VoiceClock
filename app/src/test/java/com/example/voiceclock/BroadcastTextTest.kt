@@ -2,7 +2,6 @@ package com.example.voiceclock
 
 import org.junit.Assert.*
 import org.junit.Test
-import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /** 校验天气解析与播报文案拼装。 */
@@ -56,11 +55,10 @@ class BroadcastTextTest {
         assertTrue(weather.speech("").startsWith("多云"))
     }
 
-    @Test fun weatherSpeechMentionsNightRainAndPrecipitation() {
+    @Test fun weatherSpeechMentionsRainAndPrecipitation() {
         val night = """{"current":{"temperature_2m":8.0,"apparent_temperature":8.0,"precipitation":2.5,"weather_code":63,"is_day":0}}"""
-        val speech = WeatherClient.parse(night).speech(null)
-        // 降水类天气不应加白天/夜间修饰
-        assertEquals("中雨，气温 8 摄氏度，降水量 2.5 毫米", speech)
+        // 降水类天气不加白天/夜间修饰
+        assertEquals("中雨，气温 8 摄氏度，降水量 2.5 毫米", WeatherClient.parse(night).speech(null))
     }
 
     @Test fun clearNightWeatherIsMarked() {
@@ -75,7 +73,7 @@ class BroadcastTextTest {
         assertEquals("现在时间，11月20日 星期五 中午12点整。", BroadcastText.timeSentence(time("2026-11-20T12:00:00")))
         assertEquals("现在时间，11月20日 星期五 凌晨5点30分。", BroadcastText.timeSentence(time("2026-11-20T05:30:00")))
         assertEquals("现在时间，11月20日 星期五 晚上9点整。", BroadcastText.timeSentence(time("2026-11-20T21:00:00")))
-        assertEquals("现在时间，11月20日 星期五 上午0点15分。", BroadcastText.timeSentence(time("2026-11-20T00:15:00")))
+        assertEquals("现在时间，11月20日 星期五 凌晨0点15分。", BroadcastText.timeSentence(time("2026-11-20T00:15:00")))
     }
 
     @Test fun fullBroadcastJoinsAllThreeParts() {
@@ -83,6 +81,14 @@ class BroadcastTextTest {
             BroadcastText.Parts(time("2026-11-20T13:01:00"), "多云，气温 12 摄氏度", "明天是小雪")
         )
         assertEquals("现在时间，11月20日 星期五 下午1点1分。天气，多云，气温 12 摄氏度。明天是小雪。", text)
+    }
+
+    @Test fun missingTrailingFullStopIsAdded() {
+        // 防止 TTS 把「摄氏度明天是小雪」连读
+        val text = BroadcastText.build(
+            BroadcastText.Parts(time("2026-11-20T13:01:00"), "多云，气温 12 摄氏度", "距离冬至还有 32 天")
+        )
+        assertEquals("现在时间，11月20日 星期五 下午1点1分。天气，多云，气温 12 摄氏度。距离冬至还有 32 天。", text)
     }
 
     @Test fun missingPartsAreSkipped() {

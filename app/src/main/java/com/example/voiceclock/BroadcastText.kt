@@ -21,21 +21,31 @@ object BroadcastText {
     /**
      * 构造完整播报语句。
      *
-     * 示例：「现在时间，11月20日 星期五 下午1点01分。天气，多云，气温 12 摄氏度。明天是小雪。」
+     * 示例：「现在时间，11月20日 星期五 下午1点1分。天气，多云，气温 12 摄氏度。明天是小雪。」
      */
     fun build(parts: Parts): String {
         val sentences = mutableListOf<String>()
-        sentences.add(timeSentence(parts.time))
-        parts.weatherSpeech?.takeIf { it.isNotBlank() }?.let { sentences.add("天气，$it") }
-        parts.solarTermSpeech?.takeIf { it.isNotBlank() }?.let { sentences.add(it) }
+        sentences.add(ensureEnd(timeSentence(parts.time)))
+        parts.weatherSpeech?.takeIf { it.isNotBlank() }
+            ?.let { sentences.add(ensureEnd("天气，${it.trim()}")) }
+        parts.solarTermSpeech?.takeIf { it.isNotBlank() }
+            ?.let { sentences.add(ensureEnd(it.trim())) }
         return sentences.joinToString("")
     }
 
-    /** 时间语句：现在时间，11月20日 星期五 下午1点01分。 */
+    /** 确保句子以中文句号结尾，避免 TTS 把两句连读成一个词。 */
+    private fun ensureEnd(sentence: String): String {
+        val trimmed = sentence.trim()
+        return if (trimmed.isEmpty() || trimmed.endsWith("。") || trimmed.endsWith("！") || trimmed.endsWith("？")) trimmed
+        else "$trimmed。"
+    }
+
+    /** 时间语句：现在时间，11月20日 星期五 下午1点1分。 */
     fun timeSentence(time: ZonedDateTime): String {
         val weekday = weekdays.getOrElse(time.dayOfWeek.value - 1) { "" }
         val period = when (time.hour) {
-            in 0..5 -> "凌晨"
+            0 -> "凌晨"
+            in 1..5 -> "凌晨"
             in 6..11 -> "上午"
             12 -> "中午"
             in 13..17 -> "下午"

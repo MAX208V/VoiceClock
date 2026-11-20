@@ -1,87 +1,87 @@
-# VoiceClock · 语音报时
+# VoiceClock · 定时播报时间天气节气
 
-原生 Android 语音报时应用，使用系统中文文字转语音（TTS）引擎播报当前时间。支持试听、按星期和时段运行，以及整点／半点报时。应用本身无需网络权限。
+基于 [jackjones2020/VoiceClock](https://github.com/jackjones2020/VoiceClock)（MIT）二次开发。
 
-## 下载和使用
+在原「中文语音报时」基础上增加了 **天气（自动定位）** 与 **二十四节气** 播报，
+形成「时间 + 天气 + 节气」三合一的定时语音播报。
 
-前往 [Releases](https://github.com/jackjones2020/VoiceClock/releases/latest) 下载 APK，支持 Android 8.0 及以上。
+## 功能
 
-1. 安装后打开“语音报时”，允许通知权限；Android 12 及以上还需允许“闹钟和提醒”权限。
-2. 点“试听当前时间”检查中文语音；试听不受星期和时段限制。
-3. 选择报时模式、星期和每日时段。
-4. 点“保存并开启语音报时”。在有效时段内会立即播报，随后按计划运行。
-5. 点“查看今日报时记录”，查看当天的成功报时次数与明细；只保留当天记录。
-6. 点“停止报时”结束运行并取消下一次闹钟，已保存的设置和记录会保留。
-
-## 报时声音
-
-每次自动报时、开启后的立即报时和试听均先播放由弱到强的三声“滴”，每声持续 0.6 秒，声音之间间隔 0.4 秒；提示音以 660 Hz 为主，加入少量泛音，使用更清晰的起音和平滑淡入淡出，再以默认语速的 50% 播报当前时间。提示音是本地音频，不受语音速度设置影响。完整播报结束后只记一次成功记录。
-
-## 报时规则
-
-| 模式 | 规则 |
-| --- | --- |
-| 每隔 N 分钟 | 可选 1、5、10、15、30、60 分钟，从开启时间计算 |
-| 仅整点 | 每小时的 `:00` |
-| 仅半点 | 每小时的 `:30` |
-| 整点和半点 | 每小时的 `:00` 和 `:30` |
-
-- 勾选一周中的运行日期，所选日期共用一组每日时段，可以添加多个时段。
-- 时段包含开始时间，不包含结束时间；起止时间相同表示全天。
-- 结束时间早于开始时间表示跨午夜。例如选择周一 `22:00–02:00`，会包含周二凌晨至 `02:00` 前。
-- 时段外不播报。开启时若在时段外，将等待下一次有效计划时间。
-- “保存设置”保存星期、时段、模式和间隔；运行中保存会立即应用，并重新计算计划。
-- 设置保存在手机本地。设备重启后需要打开应用恢复运行。
-- 自动报时、开启后的立即报时和试听均在 TTS 确认播放完成后保存记录；失败、取消或中断不记为成功。记录按播报开始时的本地日期归属，仅保留当天记录；打开应用、查看记录或写入新记录时会清理其他日期的数据。跨午夜仍停留在记录页面时会自动刷新并清理昨天的数据。只能记录升级后的播报。
-- 已运行时重新打开应用会保留原报时间隔；主动重新开启或保存新设置会重新计算间隔。
+- **定时播报**：按星期与每日时段，在整点／半点／自定义间隔播报
+- **语音内容**：`现在时间，11月20日 星期五 下午1点1分。天气，多云，气温 12 摄氏度。明天是小雪。`
+- **天气**：Open-Meteo 免费接口，无需 API Key，按经纬度查询
+- **自动定位**：前台粗定位（`ACCESS_COARSE_LOCATION`），优先取系统最近位置，失败用缓存坐标
+- **节气**：本地天文算法计算二十四节气，无需联网
+  - 今日交节 → 「今天是立冬」
+  - 明日交节 → 「明天是小雪」
+  - 其它 → 「距离冬至还有 32 天」
+- **降级策略**：天气获取失败或未授权定位时，仍正常播报时间与节气，不会静默
+- **锁屏可靠**：`AlarmManager.setAlarmClock` + 前台服务 + 短暂唤醒锁
 
 ## 构建
 
-使用 Android Studio 打开项目，设置 Gradle JDK 为 Java 17 或 Java 21，并安装 Android SDK Platform 35、Build Tools 35.0.0 和 Platform Tools。真机开发无需模拟器镜像。
+GitHub Actions 自动构建（`.github/workflows/build.yml`）：
 
-应用版本：1.1.3，采用三位版本号。
+- 推送到 `main` 自动触发
+- 运行单元测试 `./gradlew testDebugUnitTest`
+- 构建 APK `./gradlew assembleDebug`
+- APK 作为 artifact `voiceclock-debug-apk` 供下载（保留 30 天）
 
-构建工具版本：Gradle 8.11.1、Android Gradle Plugin 8.9.2、Kotlin 2.1.10；最低 Android API 26，目标 API 35。
+本地构建：
 
-命令行构建前设置 `JAVA_HOME`，并设置 `ANDROID_HOME` 或在项目根目录的 `local.properties` 中配置 `sdk.dir`：
-
-```sh
+```bash
+./gradlew testDebugUnitTest
 ./gradlew assembleDebug
-./gradlew testDebugUnitTest lintDebug
+# 输出 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-APK 输出到 `app/build/outputs/apk/debug/app-debug.apk`。连接已开启 USB 调试的手机后：
-
-```sh
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-adb shell am start -n com.example.voiceclock/.MainActivity
-```
-
-仓库不包含本机 SDK／Java 路径、构建缓存或签名私钥。当前公开下载为调试签名 APK；商店发布需要自行配置正式签名。
+环境：JDK 17、Android SDK 35、Gradle 8.11.1、AGP 8.9.2、Kotlin 2.1.10，minSdk 26。
 
 ## 项目结构
 
-- `MainActivity.kt`：设置界面、试听。
-- `Settings.kt`：本地设置保存和读取。
-- `Schedule.kt`：星期、时段和下一次报时计算。
-- `ClockService.kt`：前台报时服务、播放完成回调及通知。
-- `ClockAlarms.kt` / `ClockChangeReceiver.kt`：系统闹钟及时间、时区和权限变更处理。
-- `SpeechHistory.kt` / `HistoryActivity.kt`：本地 SQLite 记录及今日回顾。
-- `TimeSpeech.kt` / `res/raw/time_chime.wav`：三声提示音与半速播报，共用同一播放队列。
-- `SpeechTracker.kt` / `SpeechTrackerTest.kt`：播放请求关联与成功、失败、中断、跨午夜测试。
-- `ScheduleTest.kt`：时段边界、跨午夜、模式和跨周调度测试。
+| 文件 | 职责 |
+|---|---|
+| `SolarTerms.kt` | 二十四节气天文计算（Meeus 太阳视黄经），含 UT→本地时区换算 |
+| `WeatherClient.kt` | Open-Meteo 天气查询与 WMO 代码中文化 |
+| `LocationHelper.kt` | 前台粗定位，取最近已知位置或单次更新 |
+| `BroadcastText.kt` | 播报文案拼装（时间／天气／节气） |
+| `Settings.kt` | 设置持久化（排程、天气、定位、节气开关与缓存） |
+| `ClockService.kt` | 前台服务、TTS 播放、后台取天气、超时兜底 |
+| `ClockAlarms.kt` | 系统闹钟调度 |
+| `MainActivity.kt` | 设置界面、天气／节气预览、完整播报试听 |
+| `Schedule.kt` | 星期／时段／间隔排程计算 |
 
-欢迎通过 Issue 反馈问题或提交 Pull Request。提交修改前请运行上述测试和代码检查，并说明复现方式和验证结果。
+## 测试
 
-## 使用限制
+单元测试 33 个，覆盖：
 
-- 手机需要可用的中文 TTS 引擎和语音数据；没有声音时，请检查系统“文字转语音输出”设置。
-- 锁屏报时使用 `AlarmManager.setAlarmClock` 唤醒设备，而非后台轮询。它适用于本应用支持的短间隔报时，系统可能显示下一次闹钟标记；频繁唤醒仍会增加耗电。
-- Android 12 及以上需“闹钟和提醒”权限；关闭该权限会让系统终止应用并取消闹钟，重新授权后打开应用恢复运行。
-- 仅在准备和播放报时语音时持有短时唤醒锁，完成、失败或超时后释放。语音使用系统闹钟音量，请确保其未静音。
-- 厂商后台限制仍可能影响应用或 TTS 引擎。界面提供电池设置入口，需要长期运行时可将电池用量设为“不受限制”，并允许厂商系统中的后台运行。
-- “成功”表示 TTS 引擎报告语音完整播放，不代表能检测到扬声器是否静音或用户是否实际听到。
+- **节气算法**：与 **USNO（美国海军天文台）** 公布的 2026／2027 年四季时刻比对，
+  误差均 ≤ 20 分钟（实测 1–9 分钟）
+- **时区换算回归**：2026 冬至 UTC 12-21 20:50 → 北京时间 12-22 04:50（防止错一天）
+- **天气解析**：Open-Meteo JSON 解析、缺字段容错、WMO 代码映射
+- **文案拼装**：时段用词（凌晨／上午／中午／下午／晚上）、句末号防连读、缺项跳过
+- **排程逻辑**：跨午夜、星期边界、模式对齐（原项目测试保持通过）
 
-## 开源许可
+## 权限
 
-采用 [MIT License](LICENSE)，允许使用、修改和分发。
+| 权限 | 用途 |
+|---|---|
+| `INTERNET` / `ACCESS_NETWORK_STATE` | 查询天气 |
+| `ACCESS_COARSE_LOCATION` | 自动定位（仅前台，可拒绝） |
+| `POST_NOTIFICATIONS` | 前台服务通知 |
+| `SCHEDULE_EXACT_ALARM` | 准点唤醒 |
+| `FOREGROUND_SERVICE*` / `WAKE_LOCK` | 播报期间保持运行 |
+
+## 已知限制
+
+- 需要系统装有中文 TTS 引擎与语音包
+- 部分厂商系统需手动允许「后台运行」「自启动」并关闭电池优化
+- 定位仅在前台请求，长期后台不刷新位置；坐标按 3 小时过期策略更新，
+
+## 许可
+
+MIT（继承上游）。上游作者：jackjones2020。
+
+## CI 诊断分支
+
+`ci-report` 分支由 CI 自动推送，仅存放构建日志与测试报告摘要，便于排查失败；可随时删除。

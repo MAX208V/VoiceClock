@@ -5,30 +5,24 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 校验播报 utterance 标识分类：辅助音频不能计入正式记录。 */
+/** 校验播报标识分类与前导停顿：辅助音频不能计入正式记录。 */
 class TimeSpeechIdTest {
 
     private val id = "abc-123"
     private val fullWidthComma = '\uFF0C'
 
-    @Test fun chimeAndLeadAreAuxiliary() {
-        assertTrue(TimeSpeech.isAuxiliary(id + ":chime"))
+    @Test fun leadIsAuxiliary() {
         assertTrue(TimeSpeech.isAuxiliary(id + ":lead"))
     }
 
     @Test fun mainSpeechIsNotAuxiliary() {
         assertFalse(TimeSpeech.isAuxiliary(id))
+        assertFalse(TimeSpeech.isAuxiliary(id + ":something"))
     }
 
-    @Test fun speechIdStripsBothSuffixes() {
-        assertEquals(id, TimeSpeech.speechId(id + ":chime"))
+    @Test fun speechIdStripsLeadSuffix() {
         assertEquals(id, TimeSpeech.speechId(id + ":lead"))
         assertEquals(id, TimeSpeech.speechId(id))
-    }
-
-    @Test fun chimeIsRecognisedButLeadIsNotChime() {
-        assertTrue(TimeSpeech.isChime(id + ":chime"))
-        assertFalse(TimeSpeech.isChime(id + ":lead"))
     }
 
     @Test fun leadTextIsOnlyFullWidthCommas() {

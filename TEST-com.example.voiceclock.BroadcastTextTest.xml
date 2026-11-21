@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.BroadcastTextTest" tests="12" skipped="0" failures="0" errors="0" timestamp="2026-11-21T11:26:17" hostname="ip-10-0-141-202" time="0.046">
+  <properties/>
+  <testcase name="clearNightWeatherIsMarked" classname="com.example.voiceclock.BroadcastTextTest" time="0.004"/>
+  <testcase name="weatherSpeechMentionsRainAndPrecipitation" classname="com.example.voiceclock.BroadcastTextTest" time="0.002"/>
+  <testcase name="shortTimeIsCompact" classname="com.example.voiceclock.BroadcastTextTest" time="0.022"/>
+  <testcase name="missingPartsAreSkipped" classname="com.example.voiceclock.BroadcastTextTest" time="0.015"/>
+  <testcase name="parsesEvenWhenOptionalFieldsAreMissing" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="missingTrailingFullStopIsAdded" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="parsesOpenMeteoCurrentBlock" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="timeSentenceIncludesDateWeekdayAndPeriod" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="fullBroadcastJoinsAllThreeParts" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="weatherSpeechOmitsPlaceWhenBlank" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="buildsReadableWeatherSpeech" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="describesAllWmoCodes" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

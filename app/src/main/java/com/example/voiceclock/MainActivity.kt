@@ -40,7 +40,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private lateinit var weatherSwitch: Switch
     private lateinit var solarTermSwitch: Switch
     private lateinit var autoLocateSwitch: Switch
+    private lateinit var duckSwitch: Switch
     private lateinit var cityInput: EditText
+    private lateinit var toggleButton: Button
     private val days = mutableListOf<CheckBox>()
     private val slots = mutableListOf<TimeSlot>()
     private val intervals = listOf(1, 5, 10, 15, 30, 60)
@@ -48,6 +50,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var speechReady = false
     private var speechInitialized = false
     private val previewTracker = SpeechTracker()
+    private val previewFocus = AudioFocusHelper(this)
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
@@ -109,6 +112,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         root.addView(solarTermSwitch)
 
+        // ---------- 音频 ----------
+        label("音频", 20f)
+        duckSwitch = Switch(this).apply {
+            text = "播报时压低其他应用音量（关闭则完全混音）"
+            isChecked = extras.duckOthers
+        }
+        root.addView(duckSwitch)
+        label("播报会自动跟随耳机、蓝牙音箱等当前输出设备；不要手动切换。", 14f)
+
         infoPreview = TextView(this).apply {
             textSize = 15f
             setBackgroundColor(0x11000000)
@@ -121,7 +133,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         button("试听当前时间") { preview(BroadcastText.shortTime(ZonedDateTime.now()), "试听") }
         button("查看今日报时记录") { startActivity(Intent(this, HistoryActivity::class.java)) }
 
-        label("锁屏播报使用系统闹钟唤醒；系统可能显示下一次闹钟标记。语音使用闹钟音量。", 14f)
+        label("锁屏播报使用系统闹钟唤醒；系统可能显示下一次闹钟标记。", 14f)
         button("设置锁屏报时权限") { openAlarmPermission() }
         button("设置后台电池用量") {
             startActivity(
@@ -172,40 +184,32 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         renderSlots()
         button("＋ 添加时段") { slots.add(TimeSlot(8 * 60, 22 * 60)); renderSlots() }
 
+        // 保存即开启报时
         button("保存设置") {
             val schedule = readSchedule() ?: return@button
             Settings.save(ctx, schedule)
             saveExtras()
-            if (Settings.enabled(ctx)) {
-                startService(Intent(ctx, ClockService::class.java).setAction(ClockService.RELOAD))
-            }
-            showStatus("设置已保存", schedule)
+            enableBroadcast(schedule)
         }
-        button("保存并开启语音报时") {
-            val schedule = readSchedule() ?: return@button
-            Settings.save(ctx, schedule)
-            saveExtras()
-            if (!ClockAlarms.permitted(ctx)) {
-                status.text = "请允许“闹钟和提醒”，返回后再次点击开启，才能在锁屏时准时报播"
-                openAlarmPermission()
-                return@button
+
+        // 单一开关按钮：文本随状态变化
+        toggleButton = Button(this).apply {
+            setOnClickListener {
+                if (Settings.enabled(ctx)) {
+                    disableBroadcast()
+                } else {
+                    val schedule = readSchedule() ?: return@setOnClickListener
+                    Settings.save(ctx, schedule)
+                    saveExtras()
+                    enableBroadcast(schedule)
+                }
             }
-            Settings.setEnabled(ctx, true)
-            startForegroundService(Intent(ctx, ClockService::class.java).setAction(ClockService.START))
-            showStatus(
-                if (schedule.allows(ZonedDateTime.now())) "已开启，将立即播报" else "已开启，当前不在播报时段",
-                schedule
-            )
-        }
-        button("停止报时") {
-            Settings.setEnabled(ctx, false)
-            ClockAlarms.cancel(ctx)
-            stopService(Intent(ctx, ClockService::class.java))
-            status.text = "已停止，设置已保留"
+            root.addView(this)
         }
 
         status = TextView(this).apply { textSize = 15f; setPadding(0, dp(16), 0, dp(16)) }
         root.addView(status)
+        updateToggleButton()
         showStatus(if (Settings.enabled(this)) "报时已开启" else "当前未开启", saved)
 
         setContentView(scroll)
@@ -214,20 +218,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onStart(utteranceId: String) = Unit
 
             override fun onDone(utteranceId: String) {
-                if (TimeSpeech.isChime(utteranceId)) return
+                if (TimeSpeech.isAuxiliary(utteranceId)) return
                 previewTracker.finish(utteranceId)?.let { record ->
                     SpeechHistory(ctx).use { it.add(record) }
+                    previewFocus.release()
                     main.post { if (::status.isInitialized) status.text = "试听播放完成，已保存报时记录" }
                 }
             }
 
             override fun onError(utteranceId: String) {
+                if (utteranceId.endsWith(":lead")) return
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
+                previewFocus.release()
                 main.post { if (::status.isInitialized) status.text = "试听失败，请检查系统语音和提示音播放" }
             }
 
             override fun onStop(utteranceId: String, interrupted: Boolean) {
+                if (TimeSpeech.isAuxiliary(utteranceId)) return
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
+                previewFocus.release()
             }
         })
 
@@ -241,6 +250,37 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         refreshPreview()
     }
 
+    /** 保存配置并开启报时。 */
+    private fun enableBroadcast(schedule: Schedule) {
+        if (!ClockAlarms.permitted(this)) {
+            status.text = "请允许“闹钟和提醒”，返回后再次点击开启，才能在锁屏时准时报播"
+            openAlarmPermission()
+            return
+        }
+        Settings.setEnabled(this, true)
+        startForegroundService(Intent(this, ClockService::class.java).setAction(ClockService.START))
+        updateToggleButton()
+        showStatus(
+            if (schedule.allows(ZonedDateTime.now())) "已保存并开启，将立即播报" else "已保存并开启，当前不在播报时段",
+            schedule
+        )
+    }
+
+    /** 关闭报时。 */
+    private fun disableBroadcast() {
+        Settings.setEnabled(this, false)
+        ClockAlarms.cancel(this)
+        stopService(Intent(this, ClockService::class.java))
+        updateToggleButton()
+        status.text = "已关闭报时，设置已保留"
+    }
+
+    private fun updateToggleButton() {
+        if (::toggleButton.isInitialized) {
+            toggleButton.text = if (Settings.enabled(this)) "关闭报时" else "开启报时"
+        }
+    }
+
     private fun saveExtras() {
         val current = Settings.extras(this)
         Settings.saveExtras(
@@ -249,6 +289,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 weatherEnabled = weatherSwitch.isChecked,
                 autoLocate = autoLocateSwitch.isChecked,
                 solarTermEnabled = solarTermSwitch.isChecked,
+                duckOthers = duckSwitch.isChecked,
                 placeName = cityInput.text.toString().trim()
             )
         )
@@ -399,9 +440,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         val now = ZonedDateTime.now()
         previewTracker.clear()
+        // 试听也遵循音频设置：duck 关时完全不干预其他应用。
+        previewFocus.request(Settings.extras(this).duckOthers)
         val id = previewTracker.begin(SpeechRecord(now, text, source))
         val result = TimeSpeech.speak(tts, text, id)
-        if (result != TextToSpeech.SUCCESS) previewTracker.fail(id)
+        if (result != TextToSpeech.SUCCESS) {
+            previewTracker.fail(id)
+            previewFocus.release()
+        }
         status.text = if (result == TextToSpeech.SUCCESS) "正在试听：$text" else "试听失败，请检查系统语音设置"
     }
 
@@ -421,6 +467,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     override fun onResume() {
         super.onResume()
         if (!::status.isInitialized) return
+        updateToggleButton()
         if (Settings.enabled(this)) {
             if (ClockAlarms.permitted(this)) {
                 startForegroundService(Intent(this, ClockService::class.java).setAction(ClockService.RESTORE))
@@ -437,6 +484,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         previewTracker.clear()
+        previewFocus.release()
         tts?.stop()
         tts?.shutdown()
         io.shutdownNow()

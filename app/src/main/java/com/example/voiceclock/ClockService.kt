@@ -89,7 +89,6 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(utteranceId: String) {
-                // 前导停顿失败不影响正式播报。
                 if (TimeSpeech.isAuxiliary(utteranceId)) return
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
@@ -198,7 +197,10 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         // 整体超时兜底：定位 + 网络不应无限等待。
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
-                beginPlayback(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now, extras)
+                beginPlayback(
+                    BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))),
+                    source, now, extras, token
+                )
             }
         }
         workTimeout = timeout
@@ -211,25 +213,25 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 workTimeout?.let { handler.removeCallbacks(it) }
                 if (activeId != null) return@post
                 val text = BroadcastText.build(BroadcastText.Parts(now, weather, solarTerm(extras, now)))
-                beginPlayback(text, source, now, extras)
+                beginPlayback(text, source, now, extras, token)
             }
         }
     }
 
-    /** 先播提示音，播完后才开始 TTS 正文。 */
-    private fun beginPlayback(text: String, source: String, now: ZonedDateTime, extras: Extras) {
-        if (activeId != null) return
+    /** 先播提示音，播完后才开始 TTS 正文。token 用于丢弃过期的播报请求。 */
+    private fun beginPlayback(text: String, source: String, now: ZonedDateTime, extras: Extras, token: Int) {
+        if (activeId != null || token != buildToken) return
         // 申请 duck 焦点：duck=false 时完全不干预其他应用。
         audioFocus?.request(extras.duckOthers)
         val player = chime
         if (player == null) {
-            speakText(text, source, now)
+            speakText(text, source, now, token)
             return
         }
         player.play(extras) {
             handler.post {
-                if (buildToken != buildToken) return@post
-                speakText(text, source, now)
+                if (token != buildToken) return@post
+                speakText(text, source, now, token)
             }
         }
     }
@@ -284,8 +286,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun speakText(text: String, source: String, now: ZonedDateTime) {
-        if (activeId != null) return
+    private fun speakText(text: String, source: String, now: ZonedDateTime, token: Int) {
+        if (activeId != null || token != buildToken) return
         val id = tracker.begin(SpeechRecord(now, text, source))
         activeId = id
         val result = try {

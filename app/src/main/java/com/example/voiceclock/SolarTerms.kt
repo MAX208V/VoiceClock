@@ -4,6 +4,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
 import java.time.ZonedDateTime
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.floor
 import kotlin.math.sin
 
@@ -15,6 +16,9 @@ import kotlin.math.sin
  *
  * 算出的儒略日为 UT（世界时），必须换算到目标时区才能得到正确的本地日期与时间；
  * 漏做换算会使北京时间早上交节的节气日期差一天。
+ *
+ * 性能：单次 solve 约 1500 次迭代，全年 24 个节气开销不小，
+ * 因此按「年 + 时区」缓存计算结果，避免每次播报/刷新重复计算。
  *
  * 全部为纯函数，不依赖 Android 框架，可直接单元测试。
  */
@@ -28,6 +32,9 @@ object SolarTerms {
     )
 
     private const val DEG = Math.PI / 180.0
+
+    /** 年份 + 时区 到 24 节气时刻的缓存。 */
+    private val yearCache = ConcurrentHashMap<String, List<Pair<String, ZonedDateTime>>>()
 
     private fun norm360(value: Double): Double {
         var v = value % 360.0
@@ -127,9 +134,14 @@ object SolarTerms {
     fun termUtc(year: Int, index: Int): ZonedDateTime =
         toZoned(solve(year, targetDegree(index)), ZoneOffset.UTC)
 
-    /** 某年全部 24 个节气，按时间升序。 */
-    fun termsOfYear(year: Int, zone: ZoneId = ZoneId.systemDefault()): List<Pair<String, ZonedDateTime>> =
-        (0 until 24).map { names[it] to term(year, it, zone) }
+    /** 某年全部 24 个节气，按时间升序（带缓存）。 */
+    fun termsOfYear(year: Int, zone: ZoneId = ZoneId.systemDefault()): List<Pair<String, ZonedDateTime>> {
+        val key = "$year@$zone"
+        yearCache[key]?.let { return it }
+        val computed = (0 until 24).map { names[it] to term(year, it, zone) }
+        yearCache[key] = computed
+        return computed
+    }
 
     /** 节气播报信息。 */
     data class Info(val speech: String, val title: String, val isToday: Boolean)

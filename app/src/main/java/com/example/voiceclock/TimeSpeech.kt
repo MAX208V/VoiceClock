@@ -7,7 +7,7 @@ import android.speech.tts.TextToSpeech
  *
  * 音频设计：
  * - 使用「辅助」用途，不强制走扬声器，自动跟随系统路由（耳机 / 蓝牙 / 扬声器）
- * - 前端插入逗号组成的长停顿，抵消蓝牙链路延迟，避免开头被吞
+ * - 前端插入停顿，抵消蓝牙链路延迟，避免开头被吞
  * - 是否压低其他应用由 AudioFocusHelper 负责
  */
 object TimeSpeech {
@@ -16,7 +16,7 @@ object TimeSpeech {
     private const val LEAD_SUFFIX = ":lead"
 
     /**
-     * 前导静音时长（毫秒）。
+     * 前导停顿时长（毫秒）。
      * TTS 无法直接播静音，这里用一串逗号让引擎产生足够长的自然停顿；
      * 以半速（0.5x）播报时，6 个逗号的停顿约 800ms，足以覆盖蓝牙唤醒延迟。
      */
@@ -25,8 +25,12 @@ object TimeSpeech {
     /** 前导停顿文本：逗号会产生自然静默，且不会发音。 */
     internal const val LEAD_TEXT = "，，，，，，"
 
-    fun configure(tts: TextToSpeech, packageName: String): Boolean =
-        tts.setAudioAttributes(AudioFocusHelper.speechAttributes()) == TextToSpeech.SUCCESS &&
+    /**
+     * 配置 TTS。音频属性由调用方通过 AudioFocusHelper 提供，
+     * 这里只做语音、语速与提示音的准备，避免静态依赖持有 Context。
+     */
+    fun configure(tts: TextToSpeech, packageName: String, helper: AudioFocusHelper): Boolean =
+        tts.setAudioAttributes(helper.speechAttributes()) == TextToSpeech.SUCCESS &&
             tts.setSpeechRate(0.5f) == TextToSpeech.SUCCESS &&
             tts.addEarcon(CHIME, packageName, R.raw.time_chime) == TextToSpeech.SUCCESS
 

@@ -38,6 +38,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
     private var buildToken = 0
     private var workTimeout: Runnable? = null
+    private var audioFocus: AudioFocusHelper? = null
 
     private val speechTimeout = Runnable {
         val current = activeId
@@ -54,6 +55,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
 
     override fun onCreate() {
         super.onCreate()
+        audioFocus = AudioFocusHelper(this)
         SpeechHistory(this).use { it.clearExpired() }
         getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel("voice_clock", "语音报时", NotificationManager.IMPORTANCE_LOW)
@@ -63,7 +65,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             override fun onStart(utteranceId: String) = Unit
 
             override fun onDone(utteranceId: String) {
-                if (TimeSpeech.isChime(utteranceId)) return
+                // 提示音与前导静音不记录，也不触发结束逻辑。
+                if (TimeSpeech.isAuxiliary(utteranceId)) return
                 tracker.finish(utteranceId)?.let { record ->
                     SpeechHistory(this@ClockService).use { it.add(record) }
                 }
@@ -71,12 +74,15 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(utteranceId: String) {
+                // 前导静音失败不影响正式播报；提示音失败需要终止。
+                if (utteranceId.endsWith(":lead")) return
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
                 handler.post { finished(id, "报时失败，请检查系统语音和提示音播放") }
             }
 
             override fun onStop(utteranceId: String, interrupted: Boolean) {
+                if (TimeSpeech.isAuxiliary(utteranceId)) return
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
                 handler.post { finished(id, "报时被中断") }
@@ -166,7 +172,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         // 整体超时兜底：定位 + 网络不应无限等待。
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
-                speakText(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now)
+                speakText(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now, extras)
             }
         }
         workTimeout = timeout
@@ -179,7 +185,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 workTimeout?.let { handler.removeCallbacks(it) }
                 if (activeId != null) return@post
                 val text = BroadcastText.build(BroadcastText.Parts(now, weather, solarTerm(extras, now)))
-                speakText(text, source, now)
+                speakText(text, source, now, extras)
             }
         }
     }
@@ -226,8 +232,10 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         } ?: Settings.cachedWeather(this).takeIf { it.isNotBlank() }
     }
 
-    private fun speakText(text: String, source: String, now: ZonedDateTime) {
+    private fun speakText(text: String, source: String, now: ZonedDateTime, extras: Extras) {
         if (activeId != null) return
+        // 根据设置申请 duck 焦点：duck=false 时完全不干预其他应用。
+        audioFocus?.request(extras.duckOthers)
         val id = tracker.begin(SpeechRecord(now, text, source))
         activeId = id
         if (TimeSpeech.speak(tts, text, id) != TextToSpeech.SUCCESS) {
@@ -255,6 +263,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         activeId = null
         problem = error
         workTimeout?.let { handler.removeCallbacks(it) }
+        // 播报结束立即释放焦点，其他应用音量恢复。
+        audioFocus?.release()
         releaseWakeLock()
         updateNotification()
     }
@@ -283,6 +293,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     override fun onDestroy() {
         tracker.clear()
         handler.removeCallbacksAndMessages(null)
+        audioFocus?.release()
         releaseWakeLock()
         io.shutdownNow()
         tts?.stop()

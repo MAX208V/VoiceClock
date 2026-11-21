@@ -39,6 +39,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     private var buildToken = 0
     private var workTimeout: Runnable? = null
     private var audioFocus: AudioFocusHelper? = null
+    private var chime: ChimePlayer? = null
 
     private val speechTimeout = Runnable {
         val current = activeId
@@ -47,6 +48,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             activeId = null
         }
         pendingSpeech = null
+        chime?.release()
         tts?.stop()
         problem = "语音播放超时，请检查中文语音和后台运行设置"
         releaseWakeLock()
@@ -56,6 +58,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     override fun onCreate() {
         super.onCreate()
         audioFocus = AudioFocusHelper(applicationContext)
+        chime = ChimePlayer(applicationContext)
         try {
             SpeechHistory(this).use { it.clearExpired() }
         } catch (_: Throwable) {
@@ -73,7 +76,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             override fun onStart(utteranceId: String) = Unit
 
             override fun onDone(utteranceId: String) {
-                // 提示音与前导停顿不记录，也不触发结束逻辑。
+                // 前导停顿不记录，也不触发结束逻辑。
                 if (TimeSpeech.isAuxiliary(utteranceId)) return
                 tracker.finish(utteranceId)?.let { record ->
                     try {
@@ -86,11 +89,11 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
             }
 
             override fun onError(utteranceId: String) {
-                // 前导停顿失败不影响正式播报；提示音失败需要终止。
-                if (utteranceId.endsWith(":lead")) return
+                // 前导停顿失败不影响正式播报。
+                if (TimeSpeech.isAuxiliary(utteranceId)) return
                 val id = TimeSpeech.speechId(utteranceId)
                 tracker.fail(id)
-                handler.post { finished(id, "报时失败，请检查系统语音和提示音播放") }
+                handler.post { finished(id, "报时失败，请检查系统语音设置") }
             }
 
             override fun onStop(utteranceId: String, interrupted: Boolean) {
@@ -161,7 +164,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 val language = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
                 val helper = audioFocus ?: AudioFocusHelper(applicationContext).also { audioFocus = it }
                 ready = language != null && language >= TextToSpeech.LANG_AVAILABLE &&
-                    tts?.let { TimeSpeech.configure(it, packageName, helper) } == true
+                    tts?.let { TimeSpeech.configure(it, helper) } == true
             }
         } catch (_: Throwable) {
             ready = false
@@ -179,8 +182,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * 播报：先在后台线程取天气（带超时），再拼装「时间 + 天气 + 节气」并送入 TTS。
-     * 天气失败不会阻断报时，仍播报时间与节气。
+     * 播报：先在后台线程取天气（带超时），再拼装「时间 + 天气 + 节气」，
+     * 然后先播提示音，提示音结束后才送入 TTS。
      */
     private fun announce() {
         val source = pendingSpeech ?: return
@@ -195,7 +198,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         // 整体超时兜底：定位 + 网络不应无限等待。
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
-                speakText(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now, extras)
+                beginPlayback(BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))), source, now, extras)
             }
         }
         workTimeout = timeout
@@ -208,7 +211,25 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 workTimeout?.let { handler.removeCallbacks(it) }
                 if (activeId != null) return@post
                 val text = BroadcastText.build(BroadcastText.Parts(now, weather, solarTerm(extras, now)))
-                speakText(text, source, now, extras)
+                beginPlayback(text, source, now, extras)
+            }
+        }
+    }
+
+    /** 先播提示音，播完后才开始 TTS 正文。 */
+    private fun beginPlayback(text: String, source: String, now: ZonedDateTime, extras: Extras) {
+        if (activeId != null) return
+        // 申请 duck 焦点：duck=false 时完全不干预其他应用。
+        audioFocus?.request(extras.duckOthers)
+        val player = chime
+        if (player == null) {
+            speakText(text, source, now)
+            return
+        }
+        player.play(extras) {
+            handler.post {
+                if (buildToken != buildToken) return@post
+                speakText(text, source, now)
             }
         }
     }
@@ -263,10 +284,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    private fun speakText(text: String, source: String, now: ZonedDateTime, extras: Extras) {
+    private fun speakText(text: String, source: String, now: ZonedDateTime) {
         if (activeId != null) return
-        // 根据设置申请 duck 焦点：duck=false 时完全不干预其他应用。
-        audioFocus?.request(extras.duckOthers)
         val id = tracker.begin(SpeechRecord(now, text, source))
         activeId = id
         val result = try {
@@ -335,6 +354,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         tracker.clear()
         handler.removeCallbacksAndMessages(null)
         audioFocus?.release()
+        chime?.release()
+        chime = null
         releaseWakeLock()
         io.shutdownNow()
         tts?.stop()

@@ -7,7 +7,7 @@ import android.speech.tts.TextToSpeech
  *
  * 音频设计：
  * - 使用「辅助」用途，不强制走扬声器，自动跟随系统路由（耳机 / 蓝牙 / 扬声器）
- * - 前端插入短静音，抵消蓝牙链路延迟，避免开头被吞
+ * - 前端插入逗号组成的长停顿，抵消蓝牙链路延迟，避免开头被吞
  * - 是否压低其他应用由 AudioFocusHelper 负责
  */
 object TimeSpeech {
@@ -15,8 +15,15 @@ object TimeSpeech {
     private const val CHIME_SUFFIX = ":chime"
     private const val LEAD_SUFFIX = ":lead"
 
-    /** 蓝牙唤醒前导静音时长（毫秒）。 */
+    /**
+     * 前导静音时长（毫秒）。
+     * TTS 无法直接播静音，这里用一串逗号让引擎产生足够长的自然停顿；
+     * 以半速（0.5x）播报时，6 个逗号的停顿约 800ms，足以覆盖蓝牙唤醒延迟。
+     */
     const val LEAD_IN_MS = 800L
+
+    /** 前导停顿文本：逗号会产生自然静默，且不会发音。 */
+    internal const val LEAD_TEXT = "，，，，，，"
 
     fun configure(tts: TextToSpeech, packageName: String): Boolean =
         tts.setAudioAttributes(AudioFocusHelper.speechAttributes()) == TextToSpeech.SUCCESS &&
@@ -24,14 +31,12 @@ object TimeSpeech {
             tts.addEarcon(CHIME, packageName, R.raw.time_chime) == TextToSpeech.SUCCESS
 
     /**
-     * 播报。顺序：前导静音 → 三声提示音 → 正式内容。
-     * 前导静音用若干不可见字符实现，不发音但会让引擎启动并建立音频链路。
+     * 播报。顺序：前导停顿 → 三声提示音 → 正式内容。
      */
     fun speak(tts: TextToSpeech?, text: String, id: String): Int {
         if (tts == null) return TextToSpeech.ERROR
-        // 1) 前导静音：给蓝牙/耳机链路建立时间
-        val lead = "\u00A0\u00A0"
-        tts.speak(lead, TextToSpeech.QUEUE_FLUSH, null, id + LEAD_SUFFIX)
+        // 1) 前导停顿：给蓝牙/耳机链路建立时间
+        tts.speak(LEAD_TEXT, TextToSpeech.QUEUE_FLUSH, null, id + LEAD_SUFFIX)
         // 2) 三声提示音
         if (tts.playEarcon(CHIME, TextToSpeech.QUEUE_ADD, null, id + CHIME_SUFFIX) != TextToSpeech.SUCCESS) {
             return TextToSpeech.ERROR
@@ -44,7 +49,7 @@ object TimeSpeech {
 
     fun isChime(id: String) = id.endsWith(CHIME_SUFFIX)
 
-    /** 前导静音与提示音都不计入正式播报记录。 */
+    /** 前导停顿与提示音都不计入正式播报记录。 */
     fun isAuxiliary(id: String) = id.endsWith(CHIME_SUFFIX) || id.endsWith(LEAD_SUFFIX)
 
     fun speechId(id: String) = id.removeSuffix(CHIME_SUFFIX).removeSuffix(LEAD_SUFFIX)

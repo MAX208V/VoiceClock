@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  通用兜底图标（不带 v26 限定）。
+  部分启动器或第三方工具会直接读取 mipmap/ic_launcher，
+  这里提供一份纯 vector 版本，避免找不到图标资源。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- 白色圆角底 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M0,0 L1024,0 L1024,1024 L0,1024 Z" />
+    <!-- T 的横杠 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 546,281 L 773,281" />
+    <!-- T 的竖笔 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 704,281 L 704,743" />
+    <!-- y 的左斜笔 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 525,281 L 367,572" />
+    <!-- y 的右斜笔 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 704,281 L 546,572" />
+    <!-- y 的尾钒 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 251,572 L 546,572" />
+</vector>

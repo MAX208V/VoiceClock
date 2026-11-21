@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 圆形图标兜底。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M512,0 A512,512 0 1,1 511.9,0 Z" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 546,281 L 773,281" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 704,281 L 704,743" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 525,281 L 367,572" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 704,281 L 546,572" />
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:pathData="M 251,572 L 546,572" />
+</vector>

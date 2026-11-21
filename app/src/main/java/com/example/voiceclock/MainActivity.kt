@@ -13,6 +13,8 @@ import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.text.Editable
+import android.text.TextWatcher
 import android.util.TypedValue
 import android.view.View
 import android.widget.AdapterView
@@ -25,7 +27,6 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
-import android.widget.Toast
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
@@ -37,8 +38,10 @@ import java.util.concurrent.atomic.AtomicReference
 /**
  * 设置界面。
  *
- * 交互约定：所有设置项改动即自动保存，没有「保存设置」按钮。
- * 若报时已开启，改动会立即通知服务重新排程生效。
+ * 交互约定：
+ * - 所有设置项改动即自动保存，没有「保存设置」按钮；
+ * - 若报时已开启，改动会通知服务重新排程立即生效；
+ * - 提示音可调用系统铃声选择器更换。
  */
 class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
@@ -68,7 +71,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var focusHelper: AudioFocusHelper? = null
     private var chimePlayer: ChimePlayer? = null
 
-    /** 避免程序化设置控件时触发自动保存。 */
+    /** 程序化设置控件时抑制自动保存。 */
     private var suppressAutoSave = false
 
     /** 输入框防抖保存。 */
@@ -99,16 +102,19 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val detail = buildString {
             append(title).append('\n')
             append(error.javaClass.name).append(": ").append(error.message ?: "").append("\n\n")
-            error.cause?.let { append("Caused by: ").append(it.javaClass.name).append(": ").append(it.message ?: "").append("\n\n") }
+            error.cause?.let {
+                append("Caused by: ").append(it.javaClass.name).append(": ").append(it.message ?: "").append("\n\n")
+            }
             append(error.stackTraceToString().take(1200))
         }
         try {
-            val view = TextView(this).apply {
-                text = detail
-                textSize = 12f
-                setPadding(dp(16), dp(48), dp(16), dp(16))
-            }
-            setContentView(ScrollView(this).apply { addView(view) })
+            val view = TextView(this)
+            view.text = detail
+            view.textSize = 12f
+            view.setPadding(dp(16), dp(48), dp(16), dp(16))
+            val scroll = ScrollView(this)
+            scroll.addView(view)
+            setContentView(scroll)
         } catch (_: Throwable) {
             // 无能为力
         }
@@ -130,55 +136,58 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addLabel(root, "语音报时播报器", 28f)
         addLabel(root, "定时播报：时间 + 天气（自动定位）+ 节气。所有设置改动自动保存。", 14f)
 
+        // ---------- 播报内容 ----------
         addLabel(root, "播报内容", 20f)
         suppressAutoSave = true
-        weatherSwitch = Switch(this).also {
-            it.text = "播报天气（Open-Meteo，免密钥）"
-            it.isChecked = extras.weatherEnabled
-            it.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-            root.addView(it)
-        }
-        autoLocateSwitch = Switch(this).also {
-            it.text = "自动定位（前台粗定位）"
-            it.isChecked = extras.autoLocate
-            it.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-            root.addView(it)
-        }
-        cityInput = EditText(this).also {
-            it.hint = "城市名（仅用于播报前缀，可留空）"
-            it.setText(extras.placeName)
-            it.addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
-                override fun afterTextChanged(s: android.text.Editable?) {
-                    if (suppressAutoSave) return
-                    mainHandler.removeCallbacks(citySaveRunnable)
-                    mainHandler.postDelayed(citySaveRunnable, 600)
-                }
-            })
-            root.addView(it)
-        }
-        solarTermSwitch = Switch(this).also {
-            it.text = "播报二十四节气"
-            it.isChecked = extras.solarTermEnabled
-            it.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-            root.addView(it)
-        }
 
+        weatherSwitch = Switch(this)
+        weatherSwitch?.text = "播报天气（Open-Meteo，免密钥）"
+        weatherSwitch?.isChecked = extras.weatherEnabled
+        weatherSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
+        root.addView(weatherSwitch)
+
+        autoLocateSwitch = Switch(this)
+        autoLocateSwitch?.text = "自动定位（前台粗定位）"
+        autoLocateSwitch?.isChecked = extras.autoLocate
+        autoLocateSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
+        root.addView(autoLocateSwitch)
+
+        cityInput = EditText(this)
+        cityInput?.hint = "城市名（仅用于播报前缀，可留空）"
+        cityInput?.setText(extras.placeName)
+        cityInput?.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                if (suppressAutoSave) return
+                mainHandler.removeCallbacks(citySaveRunnable)
+                mainHandler.postDelayed(citySaveRunnable, 600)
+            }
+        })
+        root.addView(cityInput)
+
+        solarTermSwitch = Switch(this)
+        solarTermSwitch?.text = "播报二十四节气"
+        solarTermSwitch?.isChecked = extras.solarTermEnabled
+        solarTermSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
+        root.addView(solarTermSwitch)
+
+        // ---------- 音频 ----------
         addLabel(root, "音频", 20f)
-        duckSwitch = Switch(this).also {
-            it.text = "播报时压低其他应用音量（关闭则完全混音）"
-            it.isChecked = extras.duckOthers
-            it.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-            root.addView(it)
-        }
 
-        chimeButton = Button(this).also { button ->
-            button.text = chimeButtonText(extras)
-            button.setOnClickListener { chooseChime() }
-            root.addView(button)
-        }
+        duckSwitch = Switch(this)
+        duckSwitch?.text = "播报时压低其他应用音量（关闭则完全混音）"
+        duckSwitch?.isChecked = extras.duckOthers
+        duckSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
+        root.addView(duckSwitch)
+
+        chimeButton = Button(this)
+        chimeButton?.text = chimeButtonText(extras)
+        chimeButton?.setOnClickListener { chooseChime() }
+        root.addView(chimeButton)
+
         addButton(root, "试听提示音") { playChimePreview() }
+
         addButton(root, "不播提示音") {
             val current = Settings.extras(this)
             Settings.saveExtras(
@@ -188,6 +197,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             chimeButton?.text = chimeButtonText(Settings.extras(this))
             notifyServiceReload()
         }
+
         addButton(root, "恢复内置提示音") {
             val current = Settings.extras(this)
             Settings.saveExtras(
@@ -197,15 +207,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             chimeButton?.text = chimeButtonText(Settings.extras(this))
             notifyServiceReload()
         }
-        suppressAutoSave = false
-        addLabel(root, "播报会自动跟随耳机、蓝牙音箱等当前输出设备；不要手动切换。", 14f)
 
-        previewView = TextView(this).also {
-            it.textSize = 14f
-            it.setPadding(dp(12), dp(10), dp(12), dp(10))
-            it.text = "正在获取天气与节气…"
-            root.addView(it)
-        }
+        suppressAutoSave = false
+        addLabel(root, "播报会自动跟随耳机、蓝牙音箱等当前输出设备。", 14f)
+
+        previewView = TextView(this)
+        previewView?.textSize = 14f
+        previewView?.setPadding(dp(12), dp(10), dp(12), dp(10))
+        previewView?.text = "正在获取天气与节气…"
+        root.addView(previewView)
 
         addButton(root, "刷新定位与天气预览") { refreshPreview() }
         addButton(root, "试听完整播报（时间+天气+节气）") { preview(buildPreviewText(), "试听") }
@@ -233,18 +243,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         }
 
+        // ---------- 排程 ----------
         addLabel(root, "报时模式", 20f)
         suppressAutoSave = true
-        modeSpinner = Spinner(this).also {
-            it.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, Schedule.modes)
-            it.setSelection(saved.mode.coerceIn(0, Schedule.modes.size - 1))
-            root.addView(it)
-        }
-        intervalSpinner = Spinner(this).also {
-            it.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, intervals.map { n -> "每 $n 分钟" })
-            it.setSelection(intervals.indexOf(saved.interval).coerceAtLeast(0))
-            root.addView(it)
-        }
+
+        modeSpinner = Spinner(this)
+        modeSpinner?.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, Schedule.modes)
+        modeSpinner?.setSelection(saved.mode.coerceIn(0, Schedule.modes.size - 1))
+        root.addView(modeSpinner)
+
+        intervalSpinner = Spinner(this)
+        intervalSpinner?.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            intervals.map { n -> "每 $n 分钟" }
+        )
+        intervalSpinner?.setSelection(intervals.indexOf(saved.interval).coerceAtLeast(0))
+        root.addView(intervalSpinner)
+
         modeSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 intervalSpinner?.visibility = if (position == 0) View.VISIBLE else View.GONE
@@ -253,6 +269,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+
         intervalSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 if (!suppressAutoSave) onSettingChanged()
@@ -282,13 +299,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
 
         addLabel(root, "每天的报时时段", 20f)
-        addLabel(root, "包含开始时间，不包含结束时间。开始和结束相同表示全天；结束早于开始表示跨午夜，凌晨部分属于前一天。", 13f)
+        addLabel(root, "包含开始时间，不包含结束时间。开始和结束相同表示全天；结束早于开始表示跨午夜。", 13f)
         slots.addAll(saved.slots)
-        slotContainer = LinearLayout(this).also {
-            it.orientation = LinearLayout.VERTICAL
-            root.addView(it)
-        }
+        slotContainer = LinearLayout(this)
+        slotContainer?.orientation = LinearLayout.VERTICAL
+        root.addView(slotContainer)
         renderSlots()
+
         addButton(root, "＋ 添加时段") {
             slots.add(TimeSlot(8 * 60, 22 * 60))
             renderSlots()
@@ -296,35 +313,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         suppressAutoSave = false
 
-        toggleButton = Button(this).also { button ->
-            button.setOnClickListener {
-                try {
-                    if (Settings.enabled(this)) {
-                        disableBroadcast()
-                    } else {
-                        if (readSchedule() == null) {
-                            statusView?.text = "请至少选择一天，并添加一个时段"
-                            return@setOnClickListener
-                        }
-                        enableBroadcast()
+        // ---------- 开关 ----------
+        toggleButton = Button(this)
+        toggleButton?.setOnClickListener {
+            try {
+                if (Settings.enabled(this)) {
+                    disableBroadcast()
+                } else {
+                    if (readSchedule() == null) {
+                        statusView?.text = "请至少选择一天，并添加一个时段"
+                        return@setOnClickListener
                     }
-                } catch (error: Throwable) {
-                    statusView?.text = "操作失败：${error.message}"
+                    enableBroadcast()
                 }
+            } catch (error: Throwable) {
+                statusView?.text = "操作失败：${error.message}"
             }
-            root.addView(button)
         }
+        root.addView(toggleButton)
 
-        statusView = TextView(this).also {
-            it.textSize = 14f
-            it.setPadding(0, dp(16), 0, dp(16))
-            root.addView(it)
-        }
+        statusView = TextView(this)
+        statusView?.textSize = 14f
+        statusView?.setPadding(0, dp(16), 0, dp(16))
+        root.addView(statusView)
 
         setContentView(scroll)
 
         updateToggleButton()
-        showStatus(if (Settings.enabled(this)) "报时已开启（设置改动自动保存）" else "当前未开启（设置改动自动保存）")
+        showStatus(if (Settings.enabled(this)) "报时已开启" else "当前未开启")
 
         try {
             tts = TextToSpeech(this, this)
@@ -344,26 +360,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         ChimeSource.SYSTEM -> "提示音：${extras.chimeLabel.ifBlank { "系统铃声" }}（点击更换）"
     }
 
-    /** 打开系统铃声选择器。 */
+    /** 调用系统铃声选择器。 */
     private fun chooseChime() {
         try {
             val current = Settings.extras(this)
-            val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER).apply {
-                putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION or RingtoneManager.TYPE_ALARM or RingtoneManager.TYPE_RINGTONE)
-                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
-                putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
-                putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "选择播报提示音")
-                if (current.chimeSource == ChimeSource.SYSTEM && current.chimeUri.isNotBlank()) {
-                    putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(current.chimeUri))
-                }
+            val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+            intent.putExtra(
+                RingtoneManager.EXTRA_RINGTONE_TYPE,
+                RingtoneManager.TYPE_NOTIFICATION or RingtoneManager.TYPE_ALARM or RingtoneManager.TYPE_RINGTONE
+            )
+            intent.putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+            intent.putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            intent.putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "选择播报提示音")
+            if (current.chimeSource == ChimeSource.SYSTEM && current.chimeUri.isNotBlank()) {
+                intent.putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(current.chimeUri))
             }
             startActivityForResult(intent, REQUEST_PICK_CHIME)
         } catch (error: Throwable) {
-            statusView?.text = "无法打开铃声选择器：${error.message}（可安装文件管理器或检查系统音乐选择器）"
+            statusView?.text = "无法打开铃声选择器：${error.message}"
         }
     }
 
-    @Deprecated("Activity 结果回调，兼容旧版本")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != REQUEST_PICK_CHIME || resultCode != RESULT_OK) return
@@ -391,7 +408,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** 试听当前提示音（不念正文）。 */
+    /** 只试听提示音。 */
     private fun playChimePreview() {
         try {
             val extras = Settings.extras(this)
@@ -417,13 +434,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (suppressAutoSave) return
         persistAll()
         notifyServiceReload()
+        showStatus(if (Settings.enabled(this)) "设置已自动保存" else "设置已自动保存")
     }
 
     /** 把当前界面状态写入本地。 */
     private fun persistAll() {
         try {
-            val schedule = readScheduleForSave() ?: return
-            Settings.save(this, schedule)
+            readScheduleForSave()?.let { Settings.save(this, it) }
             val current = Settings.extras(this)
             Settings.saveExtras(
                 this,
@@ -440,7 +457,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** 已开启时报时则让服务重新计算下一次计划。 */
+    /** 已开启时让服务重新计算下一次计划。 */
     private fun notifyServiceReload() {
         try {
             if (Settings.enabled(this)) {
@@ -449,8 +466,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         } catch (_: Throwable) {
             // 后台限制可能失败，不影响已保存的设置
         }
-        // 刷新状态栏文字（不影响开关状态）
-        if (::toggleButton.isInitialized) updateToggleButton()
+        updateToggleButton()
     }
 
     private fun createUtteranceListener(): UtteranceProgressListener =
@@ -733,7 +749,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** 读取当前界面排程，用于保存（允许空选择，返回 null 时保持原值）。 */
+    /** 读取当前界面排程；未选天或无时段时返回 null（不覆盖已存值）。 */
     private fun readScheduleForSave(): Schedule? {
         if (dayChecks.isEmpty() || slots.isEmpty()) return null
         val selected = HashSet<Int>()
@@ -748,7 +764,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return Schedule(selected, ArrayList(slots), modeValue, intervalValue)
     }
 
-    /** 开启前校验，必须有可用排程。 */
     private fun readSchedule(): Schedule? = readScheduleForSave()
 
     private fun showStatus(message: String) {
@@ -842,7 +857,6 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onPause() {
         super.onPause()
-        // 离开界面时立即落地输入框内容
         mainHandler.removeCallbacks(citySaveRunnable)
         persistAll()
     }

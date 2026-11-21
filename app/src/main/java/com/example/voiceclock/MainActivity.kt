@@ -53,26 +53,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private val io = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
 
-    // 不在字段初始化阶段构造：构造期的 this 尚未完全就绪，早期版本因此启动闪退。
-    private var previewFocus: AudioFocusHelper? = null
+    /**
+     * 音频焦点助手。
+     * 必须在 super.onCreate() 之后构造：早期版本在字段初始化时就构造，
+     * 那时 getSystemService 可能拿不到服务，导致一打开就闪退。
+     */
+    private var focus: AudioFocusHelper? = null
 
     /** 最近一次成功获取的天气播报文本，供试听拼接使用。 */
     @Volatile private var lastWeatherSpeech: String? = null
 
-    /** 所有 UI 状态都在 onCreate 之后才可用，期间异常不能导致闪退。 */
-    private lateinit var focus: AudioFocusHelper
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         focus = AudioFocusHelper(applicationContext)
-        previewFocus = focus
-
         try {
             buildUi()
         } catch (error: Throwable) {
             // 即使构建界面出错，也要给出可读提示，而不是直接闪退。
             val fallback = TextView(this).apply {
-                text = "界面初始化失败：${error.message}\n${error.stackTraceToString().take(800)}"
+                text = "界面初始化失败：" + (error.message ?: error.javaClass.simpleName)
                 textSize = 13f
                 setPadding(40, 40, 40, 40)
             }
@@ -242,8 +241,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onDone(utteranceId: String) {
                 if (TimeSpeech.isAuxiliary(utteranceId)) return
                 previewTracker.finish(utteranceId)?.let { record ->
-                    SpeechHistory(ctx).use { it.add(record) }
-                    focus.release()
+                    try {
+                        SpeechHistory(ctx).use { it.add(record) }
+                    } catch (_: Throwable) {
+                        // 历史写入失败不影响界面
+                    }
+                    focus?.release()
                     main.post { if (::status.isInitialized) status.text = "试听播放完成，已保存报时记录" }
                 }
             }
@@ -251,14 +254,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun onError(utteranceId: String) {
                 if (utteranceId.endsWith(":lead")) return
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
-                focus.release()
+                focus?.release()
                 main.post { if (::status.isInitialized) status.text = "试听失败，请检查系统语音和提示音播放" }
             }
 
             override fun onStop(utteranceId: String, interrupted: Boolean) {
                 if (TimeSpeech.isAuxiliary(utteranceId)) return
                 previewTracker.fail(TimeSpeech.speechId(utteranceId))
-                focus.release()
+                focus?.release()
             }
         })
 
@@ -267,7 +270,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             if (it == Manifest.permission.POST_NOTIFICATIONS && Build.VERSION.SDK_INT < 33) false
             else checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
         }
-        if (missing.isNotEmpty()) requestPermissions(missing.toTypedArray(), 10)
+        if (missing.isNotEmpty()) {
+            try {
+                requestPermissions(missing.toTypedArray(), 10)
+            } catch (_: Throwable) {
+                // 权限请求失败不影响界面
+            }
+        }
 
         refreshPreview()
     }
@@ -326,12 +335,17 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private fun buildPreviewText(): String {
         val now = ZonedDateTime.now()
         val extras = Settings.extras(this)
-        val term = if (extras.solarTermEnabled) SolarTerms.infoFor(now.toLocalDate(), now.zone).speech else null
+        val term = try {
+            if (extras.solarTermEnabled) SolarTerms.infoFor(now.toLocalDate(), now.zone).speech else null
+        } catch (_: Throwable) {
+            null
+        }
         return BroadcastText.build(BroadcastText.Parts(now, lastWeatherSpeech, term))
     }
 
     /** 后台取定位 + 天气 + 节气，刷新预览（节气计算不上主线程）。 */
     private fun refreshPreview() {
+        if (!::infoPreview.isInitialized) return
         infoPreview.text = "正在获取天气与节气…"
         val now = ZonedDateTime.now()
         val ctx = this
@@ -379,7 +393,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                         text = "定位超时"
                     }
                 } catch (error: Throwable) {
-                    text = "天气获取失败：${error.message ?: "未知错误"}"
+                    text = "天气获取失败：" + (error.message ?: "未知错误")
                 }
             }
             val weatherLine = text
@@ -468,8 +482,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         try {
             if (result == TextToSpeech.SUCCESS) {
                 val language = tts?.setLanguage(Locale.SIMPLIFIED_CHINESE)
+                val helper = focus ?: AudioFocusHelper(applicationContext).also { focus = it }
                 speechReady = language != null && language >= TextToSpeech.LANG_AVAILABLE &&
-                    tts?.let { TimeSpeech.configure(it, packageName, focus) } == true
+                    tts?.let { TimeSpeech.configure(it, packageName, helper) } == true
             }
         } catch (_: Throwable) {
             speechReady = false
@@ -487,7 +502,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val now = ZonedDateTime.now()
         previewTracker.clear()
         // 试听也遵循音频设置：duck 关时完全不干预其他应用。
-        focus.request(Settings.extras(this).duckOthers)
+        focus?.request(Settings.extras(this).duckOthers)
         val id = previewTracker.begin(SpeechRecord(now, text, source))
         val result = try {
             TimeSpeech.speak(tts, text, id)
@@ -496,7 +511,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         if (result != TextToSpeech.SUCCESS) {
             previewTracker.fail(id)
-            focus.release()
+            focus?.release()
         }
         status.text = if (result == TextToSpeech.SUCCESS) "正在试听：$text" else "试听失败，请检查系统语音设置"
     }
@@ -542,7 +557,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         previewTracker.clear()
-        previewFocus?.release()
+        focus?.release()
         tts?.stop()
         tts?.shutdown()
         io.shutdownNow()

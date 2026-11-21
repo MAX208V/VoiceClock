@@ -11,6 +11,8 @@ data class Extras(
     val autoLocate: Boolean = true,
     /** 是否播报节气。 */
     val solarTermEnabled: Boolean = true,
+    /** 播报时是否压低其他应用（false = 完全不干预，纯混音）。 */
+    val duckOthers: Boolean = true,
     /** 城市名，仅用于播报前缀，可留空。 */
     val placeName: String = "",
     /** 缓存的纬度，未定位时为 NaN。 */
@@ -51,7 +53,7 @@ object Settings {
         prefs(context).edit().putBoolean("enabled", enabled).apply()
     }
 
-    // ---- 天气与节气 ----
+    // ---- 天气、节气与音频 ----
 
     fun extras(context: Context): Extras {
         val p = prefs(context)
@@ -59,6 +61,7 @@ object Settings {
             weatherEnabled = p.getBoolean("weatherEnabled", true),
             autoLocate = p.getBoolean("autoLocate", true),
             solarTermEnabled = p.getBoolean("solarTermEnabled", true),
+            duckOthers = p.getBoolean("duckOthers", true),
             placeName = p.getString("placeName", "") ?: "",
             latitude = p.getFloat("latitude", Float.NaN).toDouble(),
             longitude = p.getFloat("longitude", Float.NaN).toDouble()
@@ -70,6 +73,7 @@ object Settings {
             .putBoolean("weatherEnabled", extras.weatherEnabled)
             .putBoolean("autoLocate", extras.autoLocate)
             .putBoolean("solarTermEnabled", extras.solarTermEnabled)
+            .putBoolean("duckOthers", extras.duckOthers)
             .putString("placeName", extras.placeName)
             .putFloat("latitude", extras.latitude.toFloat())
             .putFloat("longitude", extras.longitude.toFloat())

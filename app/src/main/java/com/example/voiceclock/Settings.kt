@@ -3,6 +3,15 @@ package com.example.voiceclock
 import android.content.Context
 import java.time.ZonedDateTime
 
+/**
+ * 提示音来源。
+ *
+ * DEFAULT —— 内置内置三声「滴」（res/raw/time_chime.wav）
+ * SYSTEM  —— 用户从系统铃声选择器选定的铃声（存 URI）
+ * SILENT  —— 不播提示音，直接念正文
+ */
+enum class ChimeSource { DEFAULT, SYSTEM, SILENT }
+
 /** 天气与节气播报的配置与缓存。 */
 data class Extras(
     /** 是否播报天气。 */
@@ -13,6 +22,12 @@ data class Extras(
     val solarTermEnabled: Boolean = true,
     /** 播报时是否压低其他应用（false = 完全不干预，纯混音）。 */
     val duckOthers: Boolean = true,
+    /** 提示音来源。 */
+    val chimeSource: ChimeSource = ChimeSource.DEFAULT,
+    /** 系统铃声 URI（chimeSource = SYSTEM 时有效）。 */
+    val chimeUri: String = "",
+    /** 提示音选中时展示的名称，仅用于界面。 */
+    val chimeLabel: String = "",
     /** 城市名，仅用于播报前缀，可留空。 */
     val placeName: String = "",
     /** 缓存的纬度，未定位时为 NaN。 */
@@ -57,11 +72,16 @@ object Settings {
 
     fun extras(context: Context): Extras {
         val p = prefs(context)
+        val sourceRaw = p.getString("chimeSource", ChimeSource.DEFAULT.name) ?: ChimeSource.DEFAULT.name
+        val source = runCatching { ChimeSource.valueOf(sourceRaw) }.getOrDefault(ChimeSource.DEFAULT)
         return Extras(
             weatherEnabled = p.getBoolean("weatherEnabled", true),
             autoLocate = p.getBoolean("autoLocate", true),
             solarTermEnabled = p.getBoolean("solarTermEnabled", true),
             duckOthers = p.getBoolean("duckOthers", true),
+            chimeSource = source,
+            chimeUri = p.getString("chimeUri", "") ?: "",
+            chimeLabel = p.getString("chimeLabel", "") ?: "",
             placeName = p.getString("placeName", "") ?: "",
             latitude = p.getFloat("latitude", Float.NaN).toDouble(),
             longitude = p.getFloat("longitude", Float.NaN).toDouble()
@@ -74,6 +94,9 @@ object Settings {
             .putBoolean("autoLocate", extras.autoLocate)
             .putBoolean("solarTermEnabled", extras.solarTermEnabled)
             .putBoolean("duckOthers", extras.duckOthers)
+            .putString("chimeSource", extras.chimeSource.name)
+            .putString("chimeUri", extras.chimeUri)
+            .putString("chimeLabel", extras.chimeLabel)
             .putString("placeName", extras.placeName)
             .putFloat("latitude", extras.latitude.toFloat())
             .putFloat("longitude", extras.longitude.toFloat())

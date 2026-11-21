@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  应用图标前景层：小写 y + 大写 T 组合，纯几何风格。
+  白底黑线主题下，前景为黑色笔画；背景层为纯白。
+  坐标已按自适应图标安全区（中心 66%）居中缩放。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+
+    <!-- T 的横杠（水平） -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M 546,281 L 773,281" />
+
+    <!-- T 的竖笔（垂直） -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M 704,281 L 704,743" />
+
+    <!-- y 的左斜笔 -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M 525,281 L 367,572" />
+
+    <!-- y 的右斜笔（与 T 竖笔交叉） -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M 704,281 L 546,572" />
+
+    <!-- y 的尾钒（水平向左） -->
+    <path
+        android:strokeColor="#000000"
+        android:strokeWidth="73.5"
+        android:strokeLineCap="butt"
+        android:strokeLineJoin="miter"
+        android:pathData="M 251,572 L 546,572" />
+</vector>

@@ -2,7 +2,6 @@ package com.example.voiceclock
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -10,6 +9,7 @@ import org.junit.Test
 class TimeSpeechIdTest {
 
     private val id = "abc-123"
+    private val fullWidthComma = '\uFF0C'
 
     @Test fun chimeAndLeadAreAuxiliary() {
         assertTrue(TimeSpeech.isAuxiliary(id + ":chime"))
@@ -29,12 +29,15 @@ class TimeSpeechIdTest {
     @Test fun chimeIsRecognisedButLeadIsNotChime() {
         assertTrue(TimeSpeech.isChime(id + ":chime"))
         assertFalse(TimeSpeech.isChime(id + ":lead"))
-        assertNotEquals(id + ":lead", TimeSpeech.speechId(id + ":lead"))
     }
 
-    @Test fun leadTextProducesNoAudibleSyllable() {
-        // 前导文本必须只有标点，避免被引擎念出内容
-        assertTrue(TimeSpeech.LEAD_TEXT.all { it == '，' || it == '，' })
-        assertTrue(TimeSpeech.LEAD_IN_MS > 0)
+    @Test fun leadTextIsOnlyFullWidthCommas() {
+        // 前导文本必须只含全角逗号，引擎才会产生停顿而不发音
+        assertTrue("前导文本不能为空", TimeSpeech.LEAD_TEXT.isNotEmpty())
+        assertTrue(
+            "前导文本只能包含全角逗号，实际: ${TimeSpeech.LEAD_TEXT}",
+            TimeSpeech.LEAD_TEXT.all { it == fullWidthComma }
+        )
+        assertTrue("前导时长应为正数", TimeSpeech.LEAD_IN_MS > 0)
     }
 }

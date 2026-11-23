@@ -636,15 +636,25 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         toggleButton?.text = if (Settings.enabled(this)) "关闭报时" else "开启报时"
     }
 
+    /** 用界面上的天气快照组装试听文本，与正式播报一致的开关规则。 */
     private fun buildPreviewText(): String {
         val now = ZonedDateTime.now()
         val extras = Settings.extras(this)
-        val term = try {
+        val timeSentence = BroadcastText.timeSentence(now, extras)
+        // 试听时没有天气对象，用已缓存的文本拼接（缓存本身是完整描述）
+        val weatherSentence = if (extras.hasWeatherContent) {
+            val cached = Settings.cachedWeather(this)
+            if (cached.isNotBlank()) BroadcastText.simpleWeatherSentence(cached)
+            else lastWeatherSpeech?.let { BroadcastText.simpleWeatherSentence(it) }
+        } else {
+            null
+        }
+        val termSentence = try {
             if (extras.solarTermEnabled) SolarTerms.infoFor(now.toLocalDate(), now.zone).speech else null
         } catch (_: Throwable) {
             null
         }
-        return BroadcastText.build(BroadcastText.Parts(now, lastWeatherSpeech, term))
+        return BroadcastText.build(timeSentence, weatherSentence, termSentence)
     }
 
     private fun refreshPreview() {

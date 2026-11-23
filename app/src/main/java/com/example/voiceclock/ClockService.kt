@@ -198,7 +198,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
                 beginPlayback(
-                    BroadcastText.build(BroadcastText.Parts(now, null, solarTerm(extras, now))),
+                    composeSentence(now, null, extras),
                     source, now, extras, token
                 )
             }
@@ -208,11 +208,12 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
 
         io.execute {
             val weather = if (extras.weatherEnabled) resolveWeather(extras) else null
+            val fallback = if (weather == null) cachedWeatherSentence(extras) else null
             handler.post {
                 if (token != buildToken) return@post
                 workTimeout?.let { handler.removeCallbacks(it) }
                 if (activeId != null) return@post
-                val text = BroadcastText.build(BroadcastText.Parts(now, weather, solarTerm(extras, now)))
+                val text = composeSentence(now, weather, extras, fallback)
                 beginPlayback(text, source, now, extras, token)
             }
         }
@@ -236,6 +237,23 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** 按当前开关组装完整播报语句。 */
+    private fun composeSentence(
+        now: ZonedDateTime,
+        weather: WeatherClient.Weather?,
+        extras: Extras,
+        weatherFallback: String? = null
+    ): String {
+        val timeSentence = BroadcastText.timeSentence(now, extras)
+        val weatherSentence = BroadcastText.weatherSentence(
+            weather,
+            extras,
+            extras.placeName.takeIf { it.isNotBlank() }
+        ) ?: weatherFallback
+        val termSentence = if (extras.solarTermEnabled) solarTerm(extras, now) else null
+        return BroadcastText.build(timeSentence, weatherSentence, termSentence)
+    }
+
     private fun solarTerm(extras: Extras, now: ZonedDateTime): String? {
         if (!extras.solarTermEnabled) return null
         return try {
@@ -245,8 +263,11 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** 在后台线程调用。返回天气播报文本，失败时回退到缓存。 */
-    private fun resolveWeather(extras: Extras): String? {
+    /**
+     * 在后台线程调用。返回天气对象，供 BroadcastText 按开关裁剪字段。
+     * 获取失败时返回 null，由 [cachedWeatherSentence] 用缓存文本兜底。
+     */
+    private fun resolveWeather(extras: Extras): WeatherClient.Weather? {
         return try {
             var lat = extras.latitude
             var lon = extras.longitude
@@ -271,19 +292,23 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
                 }
             }
 
-            if (lat.isNaN() || lon.isNaN()) {
-                return Settings.cachedWeather(this).takeIf { it.isNotBlank() }
-            }
+            if (lat.isNaN() || lon.isNaN()) return null
 
             val result = WeatherClient.fetch(lat, lon)
-            result.getOrNull()?.let { weather ->
-                val speech = weather.speech(extras.placeName.takeIf { it.isNotBlank() })
-                Settings.saveCachedWeather(this, speech)
-                speech
-            } ?: Settings.cachedWeather(this).takeIf { it.isNotBlank() }
+            result.getOrNull()?.also { weather ->
+                // 缓存完整描述，作为下次失败的兜底
+                Settings.saveCachedWeather(this, weather.speech(extras.placeName.takeIf { it.isNotBlank() }))
+            }
         } catch (_: Throwable) {
-            Settings.cachedWeather(this).takeIf { it.isNotBlank() }
+            null
         }
+    }
+
+    /** 天气获取失败时的兜底语句（用上次缓存的完整描述）。 */
+    private fun cachedWeatherSentence(extras: Extras): String? {
+        if (!extras.hasWeatherContent) return null
+        val cached = Settings.cachedWeather(this)
+        return cached.takeIf { it.isNotBlank() }?.let { BroadcastText.simpleWeatherSentence(it) }
     }
 
     private fun speakText(text: String, source: String, now: ZonedDateTime, token: Int) {

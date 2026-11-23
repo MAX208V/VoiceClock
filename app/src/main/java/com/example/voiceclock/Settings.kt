@@ -6,37 +6,63 @@ import java.time.ZonedDateTime
 /**
  * 提示音来源。
  *
- * DEFAULT —— 内置内置三声「滴」（res/raw/time_chime.wav）
+ * DEFAULT —— 内置三声「滴」（res/raw/time_chime.wav）
  * SYSTEM  —— 用户从系统铃声选择器选定的铃声（存 URI）
  * SILENT  —— 不播提示音，直接念正文
  */
 enum class ChimeSource { DEFAULT, SYSTEM, SILENT }
 
-/** 天气与节气播报的配置与缓存。 */
+/**
+ * 播报内容的细粒度开关。
+ *
+ * 时间：时间本体 / 日期 / 星期 / 时段词
+ * 天气：天气现象 / 当前气温 / 体感温度 / 降水量
+ * 节气：是否播报
+ */
 data class Extras(
-    /** 是否播报天气。 */
+    // ---- 时间 ----
+    val speakClock: Boolean = true,
+    val speakDate: Boolean = true,
+    val speakWeekday: Boolean = true,
+    val speakPeriod: Boolean = true,
+    // ---- 天气 ----
     val weatherEnabled: Boolean = true,
-    /** 是否自动定位（用系统最近位置）。 */
-    val autoLocate: Boolean = true,
-    /** 是否播报节气。 */
+    val speakWeatherText: Boolean = true,
+    val speakTemperature: Boolean = true,
+    val speakApparent: Boolean = true,
+    val speakPrecipitation: Boolean = true,
+    // ---- 节气 ----
     val solarTermEnabled: Boolean = true,
-    /** 播报时是否压低其他应用（false = 完全不干预，纯混音）。 */
+    // ---- 定位与音频 ----
+    val autoLocate: Boolean = true,
     val duckOthers: Boolean = true,
-    /** 提示音来源。 */
     val chimeSource: ChimeSource = ChimeSource.DEFAULT,
-    /** 系统铃声 URI（chimeSource = SYSTEM 时有效）。 */
     val chimeUri: String = "",
-    /** 提示音选中时展示的名称，仅用于界面。 */
     val chimeLabel: String = "",
-    /** 城市名，仅用于播报前缀，可留空。 */
+    /** 提示音截断长度（秒）；0 表示完整播放。 */
+    val chimeMaxSeconds: Int = 0,
     val placeName: String = "",
-    /** 缓存的纬度，未定位时为 NaN。 */
     val latitude: Double = Double.NaN,
-    /** 缓存的经度，未定位时为 NaN。 */
     val longitude: Double = Double.NaN
 ) {
     val hasLocation: Boolean
         get() = !latitude.isNaN() && !longitude.isNaN()
+
+    /** 时间部分是否有任何内容可播报。 */
+    val hasTimeContent: Boolean
+        get() = speakClock || speakDate || speakWeekday || speakPeriod
+
+    /** 天气部分是否有任何内容可播报。 */
+    val hasWeatherContent: Boolean
+        get() = weatherEnabled && (speakWeatherText || speakTemperature || speakApparent || speakPrecipitation)
+
+    companion object {
+        /** 提示音可选时长���秒）：0 = 完整。 */
+        val CHIME_SECONDS = listOf(0, 5, 3, 2, 1)
+
+        fun chimeSecondsLabel(seconds: Int): String =
+            if (seconds <= 0) "完整播放" else "$seconds 秒"
+    }
 }
 
 /** 本地设置读写。 */
@@ -75,13 +101,22 @@ object Settings {
         val sourceRaw = p.getString("chimeSource", ChimeSource.DEFAULT.name) ?: ChimeSource.DEFAULT.name
         val source = runCatching { ChimeSource.valueOf(sourceRaw) }.getOrDefault(ChimeSource.DEFAULT)
         return Extras(
+            speakClock = p.getBoolean("speakClock", true),
+            speakDate = p.getBoolean("speakDate", true),
+            speakWeekday = p.getBoolean("speakWeekday", true),
+            speakPeriod = p.getBoolean("speakPeriod", true),
             weatherEnabled = p.getBoolean("weatherEnabled", true),
-            autoLocate = p.getBoolean("autoLocate", true),
+            speakWeatherText = p.getBoolean("speakWeatherText", true),
+            speakTemperature = p.getBoolean("speakTemperature", true),
+            speakApparent = p.getBoolean("speakApparent", true),
+            speakPrecipitation = p.getBoolean("speakPrecipitation", true),
             solarTermEnabled = p.getBoolean("solarTermEnabled", true),
+            autoLocate = p.getBoolean("autoLocate", true),
             duckOthers = p.getBoolean("duckOthers", true),
             chimeSource = source,
             chimeUri = p.getString("chimeUri", "") ?: "",
             chimeLabel = p.getString("chimeLabel", "") ?: "",
+            chimeMaxSeconds = p.getInt("chimeMaxSeconds", 0).coerceAtLeast(0),
             placeName = p.getString("placeName", "") ?: "",
             latitude = p.getFloat("latitude", Float.NaN).toDouble(),
             longitude = p.getFloat("longitude", Float.NaN).toDouble()
@@ -90,13 +125,22 @@ object Settings {
 
     fun saveExtras(context: Context, extras: Extras) {
         prefs(context).edit()
+            .putBoolean("speakClock", extras.speakClock)
+            .putBoolean("speakDate", extras.speakDate)
+            .putBoolean("speakWeekday", extras.speakWeekday)
+            .putBoolean("speakPeriod", extras.speakPeriod)
             .putBoolean("weatherEnabled", extras.weatherEnabled)
-            .putBoolean("autoLocate", extras.autoLocate)
+            .putBoolean("speakWeatherText", extras.speakWeatherText)
+            .putBoolean("speakTemperature", extras.speakTemperature)
+            .putBoolean("speakApparent", extras.speakApparent)
+            .putBoolean("speakPrecipitation", extras.speakPrecipitation)
             .putBoolean("solarTermEnabled", extras.solarTermEnabled)
+            .putBoolean("autoLocate", extras.autoLocate)
             .putBoolean("duckOthers", extras.duckOthers)
             .putString("chimeSource", extras.chimeSource.name)
             .putString("chimeUri", extras.chimeUri)
             .putString("chimeLabel", extras.chimeLabel)
+            .putInt("chimeMaxSeconds", extras.chimeMaxSeconds)
             .putString("placeName", extras.placeName)
             .putFloat("latitude", extras.latitude.toFloat())
             .putFloat("longitude", extras.longitude.toFloat())

@@ -56,6 +56,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var duckSwitch: Switch? = null
     private var cityInput: EditText? = null
     private var chimeButton: Button? = null
+    private var chimeDurationSpinner: Spinner? = null
+    private var waveformView: WaveformView? = null
     private var toggleButton: Button? = null
 
     private val dayChecks = ArrayList<CheckBox>()
@@ -186,6 +188,40 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         chimeButton?.setOnClickListener { chooseChime() }
         root.addView(chimeButton)
 
+        // 提示音时长选择
+        addLabel(root, "提示音播放长度", 15f)
+        chimeDurationSpinner = Spinner(this)
+        val durationLabels = Extras.CHIME_SECONDS.map { Extras.chimeSecondsLabel(it) }
+        chimeDurationSpinner?.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_dropdown_item,
+            durationLabels
+        )
+        val currentIndex = Extras.CHIME_SECONDS.indexOf(extras.chimeMaxSeconds).coerceAtLeast(0)
+        chimeDurationSpinner?.setSelection(currentIndex)
+        chimeDurationSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (suppressAutoSave) return
+                val seconds = Extras.CHIME_SECONDS.getOrElse(position) { 0 }
+                val current = Settings.extras(this@MainActivity)
+                Settings.saveExtras(this@MainActivity, current.copy(chimeMaxSeconds = seconds))
+                notifyServiceReload()
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        root.addView(chimeDurationSpinner)
+
+        // 波形可视化
+        addLabel(root, "提示音波形", 15f)
+        waveformView = WaveformView(this)
+        waveformView?.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            dp(72)
+        )
+        root.addView(waveformView)
+        refreshWaveform()
+
         addButton(root, "试听提示音") { playChimePreview() }
 
         addButton(root, "不播提示音") {
@@ -195,6 +231,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 current.copy(chimeSource = ChimeSource.SILENT, chimeUri = "", chimeLabel = "")
             )
             chimeButton?.text = chimeButtonText(Settings.extras(this))
+            refreshWaveform()
             notifyServiceReload()
         }
 
@@ -205,6 +242,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 current.copy(chimeSource = ChimeSource.DEFAULT, chimeUri = "", chimeLabel = "")
             )
             chimeButton?.text = chimeButtonText(Settings.extras(this))
+            refreshWaveform()
             notifyServiceReload()
         }
 
@@ -360,6 +398,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         ChimeSource.SYSTEM -> "提示音：${extras.chimeLabel.ifBlank { "系统铃声" }}（点击更换）"
     }
 
+    /** 根据当前提示音设置刷新波形图。 */
+    private fun refreshWaveform() {
+        val view = waveformView ?: return
+        try {
+            val extras = Settings.extras(this)
+            when (extras.chimeSource) {
+                ChimeSource.SILENT -> view.reset()
+                ChimeSource.DEFAULT -> view.loadResource(R.raw.time_chime)
+                ChimeSource.SYSTEM -> {
+                    if (extras.chimeUri.isBlank()) view.reset()
+                    else view.load(android.net.Uri.parse(extras.chimeUri))
+                }
+            }
+        } catch (_: Throwable) {
+            view.reset()
+        }
+    }
+
     /** 调用系统铃声选择器。 */
     private fun chooseChime() {
         try {
@@ -401,6 +457,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 current.copy(chimeSource = ChimeSource.SYSTEM, chimeUri = uri.toString(), chimeLabel = label)
             )
             chimeButton?.text = chimeButtonText(Settings.extras(this))
+            refreshWaveform()
             notifyServiceReload()
             statusView?.text = "提示音已设为：$label"
         } catch (error: Throwable) {
@@ -418,8 +475,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             focus().request(extras.duckOthers)
             statusView?.text = "正在试听提示音…"
+            // 波形跟随播放进度动画
+            chime().setProgressCallback { progress ->
+                mainHandler.post { waveformView?.setProgress(progress) }
+            }
             chime().play(extras) {
                 mainHandler.post {
+                    chime().setProgressCallback(null)
+                    waveformView?.setProgress(0f)
                     focusHelper?.release()
                     statusView?.text = "提示音试听完成"
                 }
@@ -802,8 +865,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val extras = Settings.extras(this)
         focus().request(extras.duckOthers)
         statusView?.text = "正在试听…"
+        chime().setProgressCallback { progress ->
+            mainHandler.post { waveformView?.setProgress(progress) }
+        }
         chime().play(extras) {
             mainHandler.post {
+                chime().setProgressCallback(null)
+                waveformView?.setProgress(0f)
                 val now = ZonedDateTime.now()
                 previewTracker.clear()
                 val id = previewTracker.begin(SpeechRecord(now, text, source))

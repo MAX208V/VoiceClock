@@ -66,8 +66,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var duckSwitch: Switch? = null
     private var cityInput: EditText? = null
     private var chimeButton: Button? = null
-    private var chimeDurationSpinner: Spinner? = null
     private var waveformView: WaveformView? = null
+    private var chimeLengthHint: TextView? = null
     private var toggleButton: Button? = null
 
     private val dayChecks = ArrayList<CheckBox>()
@@ -205,39 +205,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         chimeButton?.setOnClickListener { chooseChime() }
         root.addView(chimeButton)
 
-        // 提示音时长选择
-        addLabel(root, "提示音播放长度", 15f)
-        chimeDurationSpinner = Spinner(this)
-        val durationLabels = Extras.CHIME_SECONDS.map { Extras.chimeSecondsLabel(it) }
-        chimeDurationSpinner?.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            durationLabels
-        )
-        val currentIndex = Extras.CHIME_SECONDS.indexOf(extras.chimeMaxSeconds).coerceAtLeast(0)
-        chimeDurationSpinner?.setSelection(currentIndex)
-        chimeDurationSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                if (suppressAutoSave) return
-                val seconds = Extras.CHIME_SECONDS.getOrElse(position) { 0 }
-                val current = Settings.extras(this@MainActivity)
-                val updated = current.copy(chimeMaxSeconds = seconds)
-                Settings.saveExtras(this@MainActivity, updated)
-                waveformView?.let { applyCutRatio(updated, it) }
-                notifyServiceReload()
-            }
+        // 提示音波形：点击/拖动选择播放时长
+        addLabel(root, "提示音播放长度（点击或拖动波形选择）", 15f)
+        chimeLengthHint = TextView(this)
+        chimeLengthHint?.textSize = 13f
+        chimeLengthHint?.setPadding(0, dp(4), 0, dp(4))
+        root.addView(chimeLengthHint)
 
-            override fun onNothingSelected(parent: AdapterView<*>?) {}
-        }
-        root.addView(chimeDurationSpinner)
-
-        // 波形可视化
-        addLabel(root, "提示音波形", 15f)
         waveformView = WaveformView(this)
+        waveformView?.interactive = true
         waveformView?.layoutParams = LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
-            dp(72)
+            dp(96)
         )
+        waveformView?.onCutChanged = { selectedMs, totalMs ->
+            onChimeLengthPicked(selectedMs, totalMs)
+        }
         root.addView(waveformView)
         refreshWaveform()
 
@@ -437,27 +420,59 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * 计算并显示截断线位置。
-     * 波形加载是异步的，时长要到解码完成后才有，因此延迟几次重试。
+     * 把已保存的时长还原到波形上。
+     * 波形加载是异步的，时长要到解码完成后才有，因此延迟重试。
      */
     private fun applyCutRatio(extras: Extras, view: WaveformView, attempt: Int = 0) {
-        val maxSeconds = extras.chimeMaxSeconds
-        if (maxSeconds <= 0) {
-            view.setCutRatio(1f)
-            return
-        }
         val duration = view.audioDurationMs
         if (duration <= 0L) {
-            // 时长还没解出来，最多重试 10 次（约 1 秒）
-            if (attempt < 10) {
+            if (attempt < 20) {
                 mainHandler.postDelayed({ applyCutRatio(extras, view, attempt + 1) }, 100)
             } else {
                 view.setCutRatio(1f)
+                updateChimeLengthHint(0L, 0L)
             }
             return
         }
-        val ratio = (maxSeconds * 1000f / duration.toFloat()).coerceIn(0f, 1f)
-        view.setCutRatio(ratio)
+        val maxSeconds = extras.chimeMaxSeconds
+        if (maxSeconds <= 0) {
+            view.setSelectedPlayMs(duration)
+        } else {
+            view.setSelectedPlayMs(maxSeconds * 1000L)
+        }
+        updateChimeLengthHint(view.selectedPlayMs(), duration)
+    }
+
+    /** 用户在波形上选定时长后调用。 */
+    private fun onChimeLengthPicked(selectedMs: Long, totalMs: Long) {
+        if (suppressAutoSave) return
+        try {
+            val current = Settings.extras(this)
+            // 选中整段时记为 0（完整播放），避免总时长略有差异导致行为不一致
+            val seconds = if (selectedMs >= totalMs) 0 else (selectedMs / 1000L).toInt().coerceAtLeast(1)
+            Settings.saveExtras(this, current.copy(chimeMaxSeconds = seconds))
+            updateChimeLengthHint(selectedMs, totalMs)
+            notifyServiceReload()
+        } catch (error: Throwable) {
+            statusView?.text = "保存播放长度失败：${error.message}"
+        }
+    }
+
+    /** 更新「播放至 x.x 秒 / 共 y.y 秒」提示。 */
+    private fun updateChimeLengthHint(selectedMs: Long, totalMs: Long) {
+        val hint = chimeLengthHint ?: return
+        hint.text = if (totalMs <= 0L) {
+            "波形加载中…"
+        } else if (selectedMs >= totalMs) {
+            String.format(Locale.US, "完整播放（共 %.1f 秒）", totalMs / 1000f)
+        } else {
+            String.format(
+                Locale.US,
+                "播放至 %.1f 秒 / 共 %.1f 秒",
+                selectedMs / 1000f,
+                totalMs / 1000f
+            )
+        }
     }
 
     /** 调用系统铃声选择器。 */

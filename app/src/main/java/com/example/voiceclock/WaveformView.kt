@@ -3,10 +3,11 @@ package com.example.voiceclock
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
-import android.graphics.Path
 import android.net.Uri
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.View
+import java.util.Locale
 import java.util.concurrent.Executors
 
 /**
@@ -35,7 +36,14 @@ class WaveformView @JvmOverloads constructor(
         private const val BAR_COUNT = 48
         /** 解码时的采样点数。 */
         private const val SAMPLE_COUNT = 512
+        /** 拖动标记的触摸容差（像素）。 */
+        private const val TOUCH_SLOP_DP = 24f
+        /** 最短可播放时长（毫秒），避免误触变成 0。 */
+        const val MIN_PLAY_MS = 500L
     }
+
+    /** 用户拖选时长后的回调（毫秒，等于总时长表示完整播放）。 */
+    var onCutChanged: ((Long, Long) -> Unit)? = null
 
     private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
@@ -69,7 +77,26 @@ class WaveformView @JvmOverloads constructor(
 
     private val executor = Executors.newSingleThreadExecutor()
 
-    private val path = Path()
+    /** 是否正在拖动结束标记。 */
+    private var dragging = false
+
+    /** 刻度与提示文字画笔。 */
+    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = 0xFF666666.toInt()
+        textSize = 24f
+    }
+
+    private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+        color = 0xFFE57373.toInt()
+    }
+
+    /** 可交互模式：显示拖动标记并响应触摸。设置为 false 时仅做展示。 */
+    var interactive: Boolean = false
+        set(value) {
+            field = value
+            invalidate()
+        }
 
     init {
         // 默认给一条平缓的示意波形，避免空白
@@ -80,8 +107,7 @@ class WaveformView @JvmOverloads constructor(
 
     /**
      * 设置截断位置（0f..1f）。
-     * 只在设置了提示音播放长度时生效，用来标示「只会播到这里」。
-     * 传 1f 表示完整播放，不绘制截断线。
+     * 传 1f 表示完整播放。
      */
     fun setCutRatio(value: Float) {
         val clamped = value.coerceIn(0f, 1f)
@@ -89,6 +115,31 @@ class WaveformView @JvmOverloads constructor(
             cutRatio = clamped
             invalidate()
         }
+    }
+
+    /** 当前选中的播放时长（毫秒）。总时长未知时返回 0。 */
+    fun selectedPlayMs(): Long {
+        val total = audioDurationMs
+        if (total <= 0L) return 0L
+        return (total * cutRatio).toLong().coerceIn(MIN_PLAY_MS, total)
+    }
+
+    /**
+     * 按时长（毫秒）设置选中位置。
+     * 传入 <= 0 或 >= 总时长表示完整播放。
+     */
+    fun setSelectedPlayMs(ms: Long) {
+        val total = audioDurationMs
+        if (total <= 0L) {
+            setCutRatio(1f)
+            return
+        }
+        val clamped = when {
+            ms <= 0L -> total
+            ms >= total -> total
+            else -> ms.coerceAtLeast(MIN_PLAY_MS)
+        }
+        setCutRatio(clamped.toFloat() / total.toFloat())
     }
 
     /** 设置播放进度（0f..1f），用于高亮已播放部分。 */
@@ -172,11 +223,17 @@ class WaveformView @JvmOverloads constructor(
         val count = amplitudes.size
         if (count == 0) return
 
+        // 为底部刻度留出空间
+        val labelHeight = if (interactive) labelPaint.textSize * 1.6f else 0f
+        val waveHeight = h - labelHeight
+        val centerY = waveHeight / 2f
+        val maxBarHeight = waveHeight * 0.9f
+
         val gap = w / (count * 4f)
         val barWidth = (w - gap * (count - 1)) / count
-        val centerY = h / 2f
-        val maxBarHeight = h * 0.9f
 
+        // 未选中区域整体压暗，突出选中范围
+        val dimPaint = idlePaint
         for (i in 0 until count) {
             val amp = amplitudes[i].coerceIn(0.02f, 1f)
             val barHeight = amp * maxBarHeight
@@ -185,20 +242,95 @@ class WaveformView @JvmOverloads constructor(
             val top = centerY - barHeight / 2f
             val bottom = centerY + barHeight / 2f
 
-            val barProgress = (i + 1f) / count
+            val barCenterRatio = (i + 0.5f) / count
             val paint = when {
-                barProgress <= progress -> playedPaint
-                progress > 0f -> idlePaint
-                else -> barPaint
+                barCenterRatio > cutRatio -> dimPaint      // 选中之外的区域
+                progress > 0f && barCenterRatio <= progress -> playedPaint  // 正在播放
+                else -> barPaint                            // 选中范围内
             }
             canvas.drawRoundRect(left, top, right, bottom, barWidth / 2f, barWidth / 2f, paint)
         }
 
-        // 截断线：标示实际会播放到哪里
-        if (cutRatio < 0.999f) {
-            val cutX = w * cutRatio
-            canvas.drawLine(cutX, 0f, cutX, h, cutPaint)
+        // 结束标记线 + 把手
+        if (cutRatio < 0.999f || interactive) {
+            val cutX = (w * cutRatio).coerceIn(0f, w)
+            canvas.drawLine(cutX, 0f, cutX, waveHeight, cutPaint)
+            if (interactive) {
+                // 圆形把手，提示可拖动
+                val handleRadius = 10f
+                canvas.drawCircle(cutX, waveHeight / 2f, handleRadius, handlePaint)
+            }
         }
+
+        // 底部刻度：0s / 选中时长 / 总时长
+        if (interactive && audioDurationMs > 0L) {
+            val total = audioDurationMs
+            val selected = selectedPlayMs()
+            val baseline = h - labelPaint.textSize * 0.3f
+            canvas.drawText("0s", 4f, baseline, labelPaint)
+            val rightText = String.format(Locale.US, "%.1fs", total / 1000f)
+            val rightWidth = labelPaint.measureText(rightText)
+            canvas.drawText(rightText, w - rightWidth - 4f, baseline, labelPaint)
+            if (selected < total) {
+                val midText = String.format(Locale.US, "%.1fs", selected / 1000f)
+                val midWidth = labelPaint.measureText(midText)
+                val midX = (w * cutRatio - midWidth / 2f).coerceIn(0f, w - midWidth)
+                canvas.drawText(midText, midX, baseline, labelPaint)
+            }
+        }
+    }
+
+    // ---------------- 触摸交互 ----------------
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!interactive || audioDurationMs <= 0L) return super.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                // 只在靠近标记或任意位置按下时开始拖动
+                dragging = true
+                parent?.requestDisallowInterceptTouchEvent(true)
+                updateCutFromTouch(event.x)
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (dragging) {
+                    updateCutFromTouch(event.x)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (dragging) {
+                    updateCutFromTouch(event.x)
+                    dragging = false
+                    parent?.requestDisallowInterceptTouchEvent(false)
+                    // 松手后回报最终选择
+                    emitCutChanged()
+                    return true
+                }
+            }
+        }
+        return super.onTouchEvent(event)
+    }
+
+    /** 根据触摸 X 坐标更新选中位置。点最右侧即完整播放。 */
+    private fun updateCutFromTouch(touchX: Float) {
+        val w = width.toFloat()
+        if (w <= 0f) return
+        val ratio = (touchX / w).coerceIn(0f, 1f)
+        val total = audioDurationMs
+        if (total <= 0L) return
+
+        val ms = (total * ratio).toLong()
+        // 靠近最右端时吸附为完整播放
+        val snapped = if (ratio > 0.97f) total else ms.coerceAtLeast(MIN_PLAY_MS)
+        setCutRatio(snapped.toFloat() / total.toFloat())
+        emitCutChanged()
+    }
+
+    private fun emitCutChanged() {
+        val total = audioDurationMs
+        if (total <= 0L) return
+        onCutChanged?.invoke(selectedPlayMs(), total)
     }
 
     override fun onDetachedFromWindow() {

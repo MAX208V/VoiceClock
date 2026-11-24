@@ -84,18 +84,35 @@ class ContentToggleTest {
         assertTrue("HasTimeContent 仍为真", extras.hasTimeContent)
     }
 
-    // ---------- 提示音时长选项 ----------
+    // ---------- 提示音时长：波形点击选定的换算 ----------
 
-    @Test fun chimeSecondsOptionsIncludeFullPlayback() {
-        assertEquals(0, Extras.CHIME_SECONDS.first())
-        assertTrue(Extras.CHIME_SECONDS.contains(5))
-        assertTrue(Extras.CHIME_SECONDS.contains(3))
-        assertTrue(Extras.CHIME_SECONDS.contains(2))
-        assertTrue(Extras.CHIME_SECONDS.contains(1))
+    /** 最短可播放时长约定为 0.5 秒（与 WaveformView.MIN_PLAY_MS 保持一致）。 */
+    @Test fun minPlayMillisIsHalfSecond() {
+        val minPlayMs = 500L
+        assertEquals(500L, minPlayMs)
     }
 
-    @Test fun chimeSecondsLabel() {
-        assertEquals("完整播放", Extras.chimeSecondsLabel(0))
-        assertEquals("3 秒", Extras.chimeSecondsLabel(3))
+    /** 选中的毫秒数换算成保存的秒数：整段记为 0（完整播放）。 */
+    @Test fun selectedMsConvertsToSavedSeconds() {
+        fun toSeconds(selectedMs: Long, totalMs: Long): Int =
+            if (selectedMs >= totalMs) 0 else (selectedMs / 1000L).toInt().coerceAtLeast(1)
+
+        val total = 5_000L
+        assertEquals(0, toSeconds(total, total))        // 点最右端 → 完整
+        assertEquals(1, toSeconds(1_200L, total))       // 1.2 秒 → 1
+        assertEquals(3, toSeconds(3_000L, total))       // 3.0 秒 → 3
+        assertEquals(1, toSeconds(500L, total))         // 最小值仍记为 1 秒
+    }
+
+    /** 保存的秒数还原成波形位置。 */
+    @Test fun savedSecondsRestoresCutPosition() {
+        fun ratioOf(savedSeconds: Int, totalMs: Long): Float =
+            if (savedSeconds <= 0) 1f
+            else ((savedSeconds * 1000f) / totalMs.toFloat()).coerceIn(0f, 1f)
+
+        val total = 10_000L
+        assertEquals(1f, ratioOf(0, total), 0.0001f)     // 完整播放
+        assertEquals(0.2f, ratioOf(2, total), 0.0001f)   // 2 秒 / 10 秒
+        assertEquals(1f, ratioOf(20, total), 0.0001f)    // 超过总时长 → 钳制为完整
     }
 }

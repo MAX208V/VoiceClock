@@ -34,6 +34,13 @@ class ChimePlayer(context: Context) {
     /** 本次实际播放时长（毫秒），用于波形进度归一化。0 表示按音频全长。 */
     private var effectiveMs: Long = 0L
 
+    /**
+     * 播放会话令牌。
+     * 每次 play() 递增；异步回调（prepareAsync 的 onPrepared、onError）
+     * 都要校验令牌，过期回调一律丢弃，避免上一首迟到的回调又把音频播出来。
+     */
+    private var session: Int = 0
+
     /** 设置播放进度回调（0f..1f），用于界面波形动画。传入 null 停止回调。 */
     fun setProgressCallback(callback: ((Float) -> Unit)?) {
         progressCallback = callback
@@ -43,8 +50,6 @@ class ChimePlayer(context: Context) {
 
     companion object {
         private const val TAG = "ChimePlayer"
-        /** 绝对上限，防止异常文件卡住播报流程。 */
-        private const val HARD_LIMIT_MS = 15_000L
         private const val PROGRESS_INTERVAL_MS = 50L
     }
 
@@ -60,51 +65,85 @@ class ChimePlayer(context: Context) {
      */
     fun play(extras: Extras, onDone: () -> Unit) {
         release()
+        // 开启新会话，之前所有在途的异步回调都会失效
+        val token = ++session
         when (extras.chimeSource) {
             ChimeSource.SILENT -> onDone()
-            ChimeSource.DEFAULT -> playRaw(R.raw.time_chime, extras.chimeMaxSeconds, onDone)
+            ChimeSource.DEFAULT -> playRaw(R.raw.time_chime, extras.chimeMaxSeconds, token, onDone)
             ChimeSource.SYSTEM -> {
                 val uri = extras.chimeUri
                 if (uri.isBlank()) {
-                    playRaw(R.raw.time_chime, extras.chimeMaxSeconds, onDone)
+                    playRaw(R.raw.time_chime, extras.chimeMaxSeconds, token, onDone)
                 } else {
-                    playUri(uri, extras.chimeMaxSeconds, onDone)
+                    playUri(uri, extras.chimeMaxSeconds, token, onDone)
                 }
             }
         }
     }
 
-    private fun playRaw(resId: Int, maxSeconds: Int, onDone: () -> Unit) {
+    private fun playRaw(resId: Int, maxSeconds: Int, token: Int, onDone: () -> Unit) {
+        if (token != session) {
+            onDone()
+            return
+        }
         try {
             val created = MediaPlayer.create(appContext, resId)
             if (created == null) {
                 onDone()
                 return
             }
-            start(created, maxSeconds, onDone)
+            start(created, maxSeconds, token, onDone)
         } catch (error: Throwable) {
             Log.w(TAG, "播放内置提示音失败", error)
             onDone()
         }
     }
 
-    private fun playUri(uriString: String, maxSeconds: Int, onDone: () -> Unit) {
+    private fun playUri(uriString: String, maxSeconds: Int, token: Int, onDone: () -> Unit) {
+        val mp = MediaPlayer()
         try {
-            val mp = MediaPlayer()
             mp.setAudioAttributes(audioAttributes())
             mp.setDataSource(appContext, Uri.parse(uriString))
-            mp.setOnPreparedListener { start(it, maxSeconds, onDone) }
-            mp.setOnErrorListener { _, what, extra ->
+            mp.setOnPreparedListener { prepared ->
+                // 关键：迟到的 prepared 回调（用户已重新点试听）必须丢弃，
+                // 否则会与新的播放器同时出声，造成重叠。
+                if (token != session) {
+                    Log.d(TAG, "丢弃过期的 prepared 回调")
+                    try {
+                        prepared.release()
+                    } catch (_: Throwable) {
+                        // 忽略
+                    }
+                    return@setOnPreparedListener
+                }
+                start(prepared, maxSeconds, token, onDone)
+            }
+            mp.setOnErrorListener { errored, what, extra ->
                 Log.w(TAG, "系统铃声播放失败 what=$what extra=$extra")
-                // 回退到内置提示音，避免静默
-                playRaw(R.raw.time_chime, maxSeconds, onDone)
+                if (token != session) {
+                    return@setOnErrorListener true
+                }
+                // 回退前先释放这个失败的实例，避免与内置提示音叠加
+                try {
+                    errored.release()
+                } catch (_: Throwable) {
+                    // 忽略
+                }
+                if (player === errored) player = null
+                playRaw(R.raw.time_chime, maxSeconds, token, onDone)
                 true
             }
             mp.prepareAsync()
             player = mp
         } catch (error: Throwable) {
             Log.w(TAG, "无法加载系统铃声，回退内置提示音", error)
-            playRaw(R.raw.time_chime, maxSeconds, onDone)
+            try {
+                mp.release()
+            } catch (_: Throwable) {
+                // 忽略
+            }
+            if (player === mp) player = null
+            playRaw(R.raw.time_chime, maxSeconds, token, onDone)
         }
     }
 
@@ -115,7 +154,17 @@ class ChimePlayer(context: Context) {
      * - maxSeconds <= 0 → 完整播放
      * - 否则在 min(maxSeconds, 实际时长) 后停止，然后继续播报
      */
-    private fun start(mp: MediaPlayer, maxSeconds: Int, onDone: () -> Unit) {
+    private fun start(mp: MediaPlayer, maxSeconds: Int, token: Int, onDone: () -> Unit) {
+        // 过期会话直接丢弃，绝不再出声
+        if (token != session) {
+            try {
+                mp.release()
+            } catch (_: Throwable) {
+                // 忽略
+            }
+            return
+        }
+
         player = mp
         var finished = false
         val finish = {
@@ -128,23 +177,21 @@ class ChimePlayer(context: Context) {
 
         mp.setOnCompletionListener { media ->
             finish()
-            media.release()
+            try {
+                media.release()
+            } catch (_: Throwable) {
+                // 忽略
+            }
             if (player === media) player = null
         }
 
         val actualDuration = try {
-            mp.duration.coerceAtLeast(1)
+            mp.duration.coerceAtLeast(0)
         } catch (_: Throwable) {
             0
         }
 
-        // 计算截断时间
-        val cutMillis: Long = when {
-            maxSeconds <= 0 -> HARD_LIMIT_MS
-            actualDuration > 0 -> minOf(maxSeconds * 1000L, actualDuration.toLong()).coerceAtMost(HARD_LIMIT_MS)
-            else -> maxSeconds * 1000L
-        }
-        // 记录本次实际播放时长，供波形进度归一化使用
+        // 实际会播放的时长（0 表示按音频全长）
         effectiveMs = when {
             maxSeconds <= 0 -> actualDuration.toLong()
             actualDuration > 0 -> minOf(maxSeconds * 1000L, actualDuration.toLong())
@@ -160,26 +207,51 @@ class ChimePlayer(context: Context) {
             return
         }
 
-        // 到时截断：停止播放并结束
-        val cut = Runnable {
-            if (!finished) {
-                Log.d(TAG, "提示音达到设定时长 ${cutMillis}ms，截断")
-                try {
-                    mp.stop()
-                } catch (_: Throwable) {
-                    // 忽略
+        // 只有显式设置了较短时长时才安装截断定时器。
+        // 完整播放交给 onCompletion，不再用 15 秒硬上限误切长铃声。
+        if (maxSeconds > 0 && actualDuration > 0 && maxSeconds * 1000L < actualDuration) {
+            val cutMillis = maxSeconds * 1000L
+            val cut = Runnable {
+                if (!finished && token == session) {
+                    Log.d(TAG, "提示音达到设定时长 ${cutMillis}ms，截断")
+                    try {
+                        mp.stop()
+                    } catch (_: Throwable) {
+                        // 忽略
+                    }
+                    finish()
+                    try {
+                        mp.release()
+                    } catch (_: Throwable) {
+                        // 忽略
+                    }
+                    if (player === mp) player = null
                 }
-                finish()
-                try {
-                    mp.release()
-                } catch (_: Throwable) {
-                    // 忽略
-                }
-                if (player === mp) player = null
             }
+            cutRunnable = cut
+            handler.postDelayed(cut, cutMillis)
+        } else if (maxSeconds > 0) {
+            // 时长未知（actualDuration <= 0）时仍按设定秒数兜底截断
+            val cutMillis = maxSeconds * 1000L
+            val cut = Runnable {
+                if (!finished && token == session) {
+                    try {
+                        mp.stop()
+                    } catch (_: Throwable) {
+                        // 忽略
+                    }
+                    finish()
+                    try {
+                        mp.release()
+                    } catch (_: Throwable) {
+                        // 忽略
+                    }
+                    if (player === mp) player = null
+                }
+            }
+            cutRunnable = cut
+            handler.postDelayed(cut, cutMillis)
         }
-        cutRunnable = cut
-        handler.postDelayed(cut, cutMillis)
     }
 
     /** 清理截断任务。 */
@@ -229,6 +301,8 @@ class ChimePlayer(context: Context) {
     /** 停止并释放当前提示音。 */
     fun release() {
         cancelCut()
+        // 使所有在途的异步回调失效（例如 prepareAsync 尚未返回）
+        session++
         try {
             player?.let {
                 if (it.isPlaying) it.stop()

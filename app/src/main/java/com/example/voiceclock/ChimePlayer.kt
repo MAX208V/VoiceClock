@@ -31,6 +31,9 @@ class ChimePlayer(context: Context) {
     private var progressCallback: ((Float) -> Unit)? = null
     private var progressTick: Runnable? = null
 
+    /** 本次实际播放时长（毫秒），用于波形进度归一化。0 表示按音频全长。 */
+    private var effectiveMs: Long = 0L
+
     /** 设置播放进度回调（0f..1f），用于界面波形动画。传入 null 停止回调。 */
     fun setProgressCallback(callback: ((Float) -> Unit)?) {
         progressCallback = callback
@@ -141,6 +144,12 @@ class ChimePlayer(context: Context) {
             actualDuration > 0 -> minOf(maxSeconds * 1000L, actualDuration.toLong()).coerceAtMost(HARD_LIMIT_MS)
             else -> maxSeconds * 1000L
         }
+        // 记录本次实际播放时长，供波形进度归一化使用
+        effectiveMs = when {
+            maxSeconds <= 0 -> actualDuration.toLong()
+            actualDuration > 0 -> minOf(maxSeconds * 1000L, actualDuration.toLong())
+            else -> maxSeconds * 1000L
+        }
 
         try {
             mp.start()
@@ -188,8 +197,11 @@ class ChimePlayer(context: Context) {
                 if (current == null || callback == null) return
                 try {
                     val duration = current.duration
-                    if (duration > 0) {
-                        callback((current.currentPosition.toFloat() / duration).coerceIn(0f, 1f))
+                    // 进度基准是「实际会播放的时长」：若设置了截断，则用截断值做分母，
+                    // 这样选 1 秒时，波形会在 1 秒内走完对应比例，而不是按整首曲子算。
+                    val basis = if (effectiveMs > 0) effectiveMs else duration.toLong()
+                    if (basis > 0) {
+                        callback((current.currentPosition.toFloat() / basis).coerceIn(0f, 1f))
                     }
                 } catch (_: Throwable) {
                     // 忽略
@@ -226,6 +238,7 @@ class ChimePlayer(context: Context) {
             // 释放失败忽略
         }
         player = null
+        effectiveMs = 0L
         try {
             progressCallback?.invoke(0f)
         } catch (_: Throwable) {

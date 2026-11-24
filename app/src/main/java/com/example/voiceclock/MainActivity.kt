@@ -52,6 +52,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var slotContainer: LinearLayout? = null
     private var weatherSwitch: Switch? = null
     private var solarTermSwitch: Switch? = null
+    // 时间细粒度
+    private var speakClockSwitch: Switch? = null
+    private var speakDateSwitch: Switch? = null
+    private var speakWeekdaySwitch: Switch? = null
+    private var speakPeriodSwitch: Switch? = null
+    // 天气细粒度
+    private var speakWeatherTextSwitch: Switch? = null
+    private var speakTemperatureSwitch: Switch? = null
+    private var speakApparentSwitch: Switch? = null
+    private var speakPrecipitationSwitch: Switch? = null
     private var autoLocateSwitch: Switch? = null
     private var duckSwitch: Switch? = null
     private var cityInput: EditText? = null
@@ -142,11 +152,21 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addLabel(root, "播报内容", 20f)
         suppressAutoSave = true
 
-        weatherSwitch = Switch(this)
-        weatherSwitch?.text = "播报天气（Open-Meteo，免密钥）"
-        weatherSwitch?.isChecked = extras.weatherEnabled
-        weatherSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-        root.addView(weatherSwitch)
+        // 时间细粒度
+        addLabel(root, "时间", 16f)
+        speakClockSwitch = makeSwitch(root, "播报时间（时:分）", extras.speakClock)
+        speakDateSwitch = makeSwitch(root, "播报日期（月日）", extras.speakDate)
+        speakWeekdaySwitch = makeSwitch(root, "播报星期", extras.speakWeekday)
+        speakPeriodSwitch = makeSwitch(root, "播报时段词（凌晨/上午/下午…）", extras.speakPeriod)
+
+        // 天气总开关
+        addLabel(root, "天气", 16f)
+
+        weatherSwitch = makeSwitch(root, "播报天气（Open-Meteo，免密钥）", extras.weatherEnabled)
+        speakWeatherTextSwitch = makeSwitch(root, "天气现象（多云/小雨）", extras.speakWeatherText)
+        speakTemperatureSwitch = makeSwitch(root, "当前气温", extras.speakTemperature)
+        speakApparentSwitch = makeSwitch(root, "体感温度", extras.speakApparent)
+        speakPrecipitationSwitch = makeSwitch(root, "降水量", extras.speakPrecipitation)
 
         autoLocateSwitch = Switch(this)
         autoLocateSwitch?.text = "自动定位（前台粗定位）"
@@ -168,11 +188,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         })
         root.addView(cityInput)
 
-        solarTermSwitch = Switch(this)
-        solarTermSwitch?.text = "播报二十四节气"
-        solarTermSwitch?.isChecked = extras.solarTermEnabled
-        solarTermSwitch?.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
-        root.addView(solarTermSwitch)
+        addLabel(root, "节气", 16f)
+        solarTermSwitch = makeSwitch(root, "播报二十四节气", extras.solarTermEnabled)
 
         // ---------- 音频 ----------
         addLabel(root, "音频", 20f)
@@ -204,7 +221,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 if (suppressAutoSave) return
                 val seconds = Extras.CHIME_SECONDS.getOrElse(position) { 0 }
                 val current = Settings.extras(this@MainActivity)
-                Settings.saveExtras(this@MainActivity, current.copy(chimeMaxSeconds = seconds))
+                val updated = current.copy(chimeMaxSeconds = seconds)
+                Settings.saveExtras(this@MainActivity, updated)
+                waveformView?.let { applyCutRatio(updated, it) }
                 notifyServiceReload()
             }
 
@@ -398,7 +417,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         ChimeSource.SYSTEM -> "提示音：${extras.chimeLabel.ifBlank { "系统铃声" }}（点击更换）"
     }
 
-    /** 根据当前提示音设置刷新波形图。 */
+    /** 根据当前提示音设置刷新波形图，并同步截断标记。 */
     private fun refreshWaveform() {
         val view = waveformView ?: return
         try {
@@ -411,9 +430,34 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     else view.load(android.net.Uri.parse(extras.chimeUri))
                 }
             }
+            applyCutRatio(extras, view)
         } catch (_: Throwable) {
             view.reset()
         }
+    }
+
+    /**
+     * 计算并显示截断线位置。
+     * 波形加载是异步的，时长要到解码完成后才有，因此延迟几次重试。
+     */
+    private fun applyCutRatio(extras: Extras, view: WaveformView, attempt: Int = 0) {
+        val maxSeconds = extras.chimeMaxSeconds
+        if (maxSeconds <= 0) {
+            view.setCutRatio(1f)
+            return
+        }
+        val duration = view.audioDurationMs
+        if (duration <= 0L) {
+            // 时长还没解出来，最多重试 10 次（约 1 秒）
+            if (attempt < 10) {
+                mainHandler.postDelayed({ applyCutRatio(extras, view, attempt + 1) }, 100)
+            } else {
+                view.setCutRatio(1f)
+            }
+            return
+        }
+        val ratio = (maxSeconds * 1000f / duration.toFloat()).coerceIn(0f, 1f)
+        view.setCutRatio(ratio)
     }
 
     /** 调用系统铃声选择器。 */
@@ -508,9 +552,20 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Settings.saveExtras(
                 this,
                 current.copy(
+                    // 时间细粒度
+                    speakClock = speakClockSwitch?.isChecked ?: current.speakClock,
+                    speakDate = speakDateSwitch?.isChecked ?: current.speakDate,
+                    speakWeekday = speakWeekdaySwitch?.isChecked ?: current.speakWeekday,
+                    speakPeriod = speakPeriodSwitch?.isChecked ?: current.speakPeriod,
+                    // 天气细粒度
                     weatherEnabled = weatherSwitch?.isChecked ?: current.weatherEnabled,
-                    autoLocate = autoLocateSwitch?.isChecked ?: current.autoLocate,
+                    speakWeatherText = speakWeatherTextSwitch?.isChecked ?: current.speakWeatherText,
+                    speakTemperature = speakTemperatureSwitch?.isChecked ?: current.speakTemperature,
+                    speakApparent = speakApparentSwitch?.isChecked ?: current.speakApparent,
+                    speakPrecipitation = speakPrecipitationSwitch?.isChecked ?: current.speakPrecipitation,
+                    // 其它
                     solarTermEnabled = solarTermSwitch?.isChecked ?: current.solarTermEnabled,
+                    autoLocate = autoLocateSwitch?.isChecked ?: current.autoLocate,
                     duckOthers = duckSwitch?.isChecked ?: current.duckOthers,
                     placeName = cityInput?.text?.toString()?.trim() ?: current.placeName
                 )
@@ -583,6 +638,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         parent.addView(button)
         return button
+    }
+
+    /** 创建一个带自动保存的开关，并添加到指定容器。 */
+    private fun makeSwitch(parent: LinearLayout, text: String, checked: Boolean): Switch {
+        val view = Switch(this)
+        view.text = text
+        view.isChecked = checked
+        view.setOnCheckedChangeListener { _, _ -> onSettingChanged() }
+        parent.addView(view)
+        return view
     }
 
     private fun requestNeededPermissions() {

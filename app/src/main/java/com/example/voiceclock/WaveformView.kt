@@ -56,6 +56,15 @@ class WaveformView @JvmOverloads constructor(
     /** 播放进度 0f..1f。 */
     private var progress: Float = 0f
 
+    /** 截断位置（0f..1f，1f 表示完整播放），用于标示实际播放范围。 */
+    private var cutRatio: Float = 1f
+
+    private val cutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = 0xFFE57373.toInt()
+    }
+
     private var loading = false
 
     private val executor = Executors.newSingleThreadExecutor()
@@ -69,6 +78,19 @@ class WaveformView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 设置截断位置（0f..1f）。
+     * 只在设置了提示音播放长度时生效，用来标示「只会播到这里」。
+     * 传 1f 表示完整播放，不绘制截断线。
+     */
+    fun setCutRatio(value: Float) {
+        val clamped = value.coerceIn(0f, 1f)
+        if (kotlin.math.abs(clamped - cutRatio) > 0.005f) {
+            cutRatio = clamped
+            invalidate()
+        }
+    }
+
     /** 设置播放进度（0f..1f），用于高亮已播放部分。 */
     fun setProgress(value: Float) {
         val clamped = value.coerceIn(0f, 1f)
@@ -78,17 +100,25 @@ class WaveformView @JvmOverloads constructor(
         }
     }
 
+    /** 音频总时长（毫秒），0 表示未知。 */
+    var audioDurationMs: Long = 0L
+        private set
+
     /** 从 URI 加载波形（系统铃声）。 */
     fun load(uri: Uri) {
         if (loading) return
         loading = true
         executor.execute {
             val result = try {
-                decodeFromUri(uri)
+                WaveformDecoder.decode(context, uri, BAR_COUNT, SAMPLE_COUNT)
             } catch (_: Throwable) {
-                FloatArray(0)
+                WaveformDecoder.Result(FloatArray(0), 0L)
             }
-            post { applyAmplitudes(result); loading = false }
+            post {
+                audioDurationMs = result.durationMs
+                applyAmplitudes(result.amplitudes)
+                loading = false
+            }
         }
     }
 
@@ -98,11 +128,15 @@ class WaveformView @JvmOverloads constructor(
         loading = true
         executor.execute {
             val result = try {
-                decodeFromResource(resId)
+                WaveformDecoder.decodeResource(context, resId, BAR_COUNT, SAMPLE_COUNT)
             } catch (_: Throwable) {
-                FloatArray(0)
+                WaveformDecoder.Result(FloatArray(0), 0L)
             }
-            post { applyAmplitudes(result); loading = false }
+            post {
+                audioDurationMs = result.durationMs
+                applyAmplitudes(result.amplitudes)
+                loading = false
+            }
         }
     }
 
@@ -112,6 +146,8 @@ class WaveformView @JvmOverloads constructor(
             (0.25f + 0.2f * kotlin.math.sin(i * 0.7f)).coerceIn(0.1f, 0.6f)
         }
         progress = 0f
+        cutRatio = 1f
+        audioDurationMs = 0L
         invalidate()
     }
 
@@ -125,20 +161,6 @@ class WaveformView @JvmOverloads constructor(
             raw
         }
         invalidate()
-    }
-
-    /**
-     * 解码音频并降采样为 BAR_COUNT 个振幅值。
-     *
-     * 使用 MediaExtractor + MediaCodec 太重，这里用更简单可靠的方案：
-     * 通过 MediaPlayer 拿到时长，用 WaveformDecoder 读取 PCM。
-     */
-    private fun decodeFromUri(uri: Uri): FloatArray {
-        return WaveformDecoder.decode(context, uri, BAR_COUNT, SAMPLE_COUNT)
-    }
-
-    private fun decodeFromResource(resId: Int): FloatArray {
-        return WaveformDecoder.decodeResource(context, resId, BAR_COUNT, SAMPLE_COUNT)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -170,6 +192,12 @@ class WaveformView @JvmOverloads constructor(
                 else -> barPaint
             }
             canvas.drawRoundRect(left, top, right, bottom, barWidth / 2f, barWidth / 2f, paint)
+        }
+
+        // 截断线：标示实际会播放到哪里
+        if (cutRatio < 0.999f) {
+            val cutX = w * cutRatio
+            canvas.drawLine(cutX, 0f, cutX, h, cutPaint)
         }
     }
 

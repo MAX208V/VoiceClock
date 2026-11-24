@@ -25,12 +25,18 @@ import kotlin.math.max
  */
 object WaveformDecoder {
 
+    /**
+     * 波形结果：振幅数据 + 音频总时长。
+     * durationMs 为 0 表示未知。
+     */
+    data class Result(val amplitudes: FloatArray, val durationMs: Long)
+
     private const val TAG = "WaveformDecoder"
     /** 最多解码的字节数，防止超长音频耗时。 */
     private const val MAX_BYTES = 4 * 1024 * 1024
 
-    /** 从 URI 解码（系统铃声等）。 */
-    fun decode(context: Context, uri: Uri, barCount: Int, sampleCount: Int): FloatArray {
+    /** 从 URI 解码（系统铃声等），返回振幅与总时长。 */
+    fun decode(context: Context, uri: Uri, barCount: Int, sampleCount: Int): Result {
         return try {
             val extractor = MediaExtractor()
             extractor.setDataSource(context, uri, null)
@@ -39,12 +45,12 @@ object WaveformDecoder {
             result
         } catch (error: Throwable) {
             Log.w(TAG, "解码 URI 波形失败: $uri", error)
-            FloatArray(0)
+            Result(FloatArray(0), 0L)
         }
     }
 
     /** 从 raw 资源解码（内置提示音）。 */
-    fun decodeResource(context: Context, resId: Int, barCount: Int, sampleCount: Int): FloatArray {
+    fun decodeResource(context: Context, resId: Int, barCount: Int, sampleCount: Int): Result {
         return try {
             // 先复制到缓存目录，MediaExtractor 对 file descriptor 支持更稳
             val temp = File(context.cacheDir, "waveform_$resId.tmp")
@@ -56,11 +62,11 @@ object WaveformDecoder {
             decode(context, Uri.fromFile(temp), barCount, sampleCount)
         } catch (error: Throwable) {
             Log.w(TAG, "解码资源波形失败: $resId", error)
-            FloatArray(0)
+            Result(FloatArray(0), 0L)
         }
     }
 
-    private fun decodeFromExtractor(extractor: MediaExtractor, barCount: Int, sampleCount: Int): FloatArray {
+    private fun decodeFromExtractor(extractor: MediaExtractor, barCount: Int, sampleCount: Int): Result {
         var trackIndex = -1
         var format: MediaFormat? = null
         for (i in 0 until extractor.trackCount) {
@@ -72,15 +78,24 @@ object WaveformDecoder {
                 break
             }
         }
-        if (trackIndex < 0 || format == null) return FloatArray(0)
+        if (trackIndex < 0 || format == null) return Result(FloatArray(0), 0L)
+
+        // 读取音频总时长（微秒 → 毫秒），供界面计算截断比例
+        val totalDurationMs = try {
+            if (format.containsKey(MediaFormat.KEY_DURATION)) {
+                format.getLong(MediaFormat.KEY_DURATION) / 1000L
+            } else 0L
+        } catch (_: Throwable) {
+            0L
+        }
 
         extractor.selectTrack(trackIndex)
-        val mime = format.getString(MediaFormat.KEY_MIME) ?: return FloatArray(0)
+        val mime = format.getString(MediaFormat.KEY_MIME) ?: return Result(FloatArray(0), 0L)
         val codec = try {
             MediaCodec.createDecoderByType(mime)
         } catch (error: Throwable) {
             Log.w(TAG, "无法创建解码器 $mime", error)
-            return FloatArray(0)
+            return Result(FloatArray(0), 0L)
         }
 
         try {
@@ -152,11 +167,11 @@ object WaveformDecoder {
                 }
             }
 
-            if (samples.isEmpty()) return FloatArray(0)
-            return downSample(samples, barCount)
+            if (samples.isEmpty()) return Result(FloatArray(0), totalDurationMs)
+            return Result(downSample(samples, barCount), totalDurationMs)
         } catch (error: Throwable) {
             Log.w(TAG, "解码过程失败", error)
-            return FloatArray(0)
+            return Result(FloatArray(0), 0L)
         } finally {
             try {
                 codec.stop()

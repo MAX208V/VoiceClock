@@ -199,6 +199,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         // 天气总开关与子项联动：关闭后子项与定位置灰
         weatherSwitch?.setOnCheckedChangeListener { _, checked ->
             setWeatherDetailEnabled(checked)
+            if (checked) requestLocationPermissionIfNeeded()
             onSettingChanged()
         }
         setWeatherDetailEnabled(extras.weatherEnabled)
@@ -759,6 +760,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
+    /** 重新打开天气总开关时补申请定位权限（启动时可能因天气关闭而未申请）。 */
+    private fun requestLocationPermissionIfNeeded() {
+        try {
+            if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                return
+            }
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), 12)
+        } catch (_: Throwable) {
+            // 忽略
+        }
+    }
+
     private fun enableBroadcast() {
         if (!ClockAlarms.permitted(this)) {
             statusView?.text = "请允许“闹钟和提醒”，返回后再次点击，才能在锁屏时准时报播"
@@ -852,9 +865,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     } else {
                         "今日节气：未开启"
                     }
-                    val timeText = now.format(
-                        DateTimeFormatter.ofPattern("M月d日 EEEE HH:mm", Locale.SIMPLIFIED_CHINESE)
-                    )
+                    val timeText = if (extras.hasTimeContent) {
+                        now.format(
+                            DateTimeFormatter.ofPattern("M月d日 EEEE HH:mm", Locale.SIMPLIFIED_CHINESE)
+                        )
+                    } else {
+                        "未开启"
+                    }
                     val weatherText = if (finalWeather.isEmpty()) "未开启" else finalWeather
                     val coords = Settings.extras(this@MainActivity)
                     val coordsLine = if (coords.hasLocation)

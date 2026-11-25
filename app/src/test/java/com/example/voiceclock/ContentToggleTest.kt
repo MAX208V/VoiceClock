@@ -115,4 +115,59 @@ class ContentToggleTest {
         assertEquals(0.2f, ratioOf(2, total), 0.0001f)   // 2 秒 / 10 秒
         assertEquals(1f, ratioOf(20, total), 0.0001f)    // 超过总时长 → 钳制为完整
     }
+
+    // ---------- 总开关：与细节开关分离 ----------
+
+    @Test fun timeMasterSwitchOffSilencesWholeTimeBlock() {
+        // 细节项全开，但总开关关闭 → 时间部分整体不播
+        val extras = Extras(
+            timeEnabled = false,
+            speakClock = true,
+            speakDate = true,
+            speakWeekday = true,
+            speakPeriod = true
+        )
+        assertFalse("总开关关闭后不应有时间内容", extras.hasTimeContent)
+        assertTrue("细节项仍然保留为开", extras.hasTimeDetail)
+        assertNull(BroadcastText.timeSentence(time("2026-11-20T13:01:00"), extras))
+    }
+
+    @Test fun timeMasterSwitchOnKeepsDetailBehavior() {
+        val extras = Extras(
+            timeEnabled = true,
+            speakClock = true,
+            speakDate = false,
+            speakWeekday = false,
+            speakPeriod = false
+        )
+        assertTrue(extras.hasTimeContent)
+        assertEquals("现在是13点1分", BroadcastText.timeSentence(time("2026-11-20T13:01:00"), extras))
+    }
+
+    @Test fun timeMasterSwitchOffDoesNotAffectWeather() {
+        val extras = Extras(timeEnabled = false)
+        assertTrue("天气不受时间总开关影响", extras.hasWeatherContent)
+        assertNull("时间部分应为空", BroadcastText.timeSentence(time("2026-11-20T13:01:00"), extras))
+        assertTrue(BroadcastText.weatherSentence(sampleWeather(), extras, "上海")!!.contains("天气"))
+    }
+
+    @Test fun weatherMasterSwitchOffSilencesWholeWeatherBlock() {
+        val extras = Extras(weatherEnabled = false)
+        assertFalse(extras.hasWeatherContent)
+        assertNull(BroadcastText.weatherSentence(sampleWeather(), extras, "上海"))
+        assertTrue("时间不受天气总开关影响", extras.hasTimeContent)
+    }
+
+    @Test fun bothMasterSwitchesOffLeavesOnlySolarTerm() {
+        val extras = Extras(timeEnabled = false, weatherEnabled = false)
+        assertFalse(extras.hasTimeContent)
+        assertFalse(extras.hasWeatherContent)
+        // 播报内容只剩节气，拼装结果不应包含时间或天气
+        val text = BroadcastText.build(
+            BroadcastText.timeSentence(time("2026-11-20T13:01:00"), extras),
+            BroadcastText.weatherSentence(sampleWeather(), extras, "上海"),
+            "今天是小雪"
+        )
+        assertEquals("今天是小雪。", text)
+    }
 }

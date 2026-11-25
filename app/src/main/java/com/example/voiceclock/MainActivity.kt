@@ -52,7 +52,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var slotContainer: LinearLayout? = null
     private var weatherSwitch: Switch? = null
     private var solarTermSwitch: Switch? = null
-    // 时间细粒度
+    // 时间总开关 + 细粒度
+    private var timeSwitch: Switch? = null
     private var speakClockSwitch: Switch? = null
     private var speakDateSwitch: Switch? = null
     private var speakWeekdaySwitch: Switch? = null
@@ -152,21 +153,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         addLabel(root, "播报内容", 20f)
         suppressAutoSave = true
 
-        // 时间细粒度
+        // 时间总开关 + 细粒度
         addLabel(root, "时间", 16f)
-        speakClockSwitch = makeSwitch(root, "播报时间（时:分）", extras.speakClock)
-        speakDateSwitch = makeSwitch(root, "播报日期（月日）", extras.speakDate)
-        speakWeekdaySwitch = makeSwitch(root, "播报星期", extras.speakWeekday)
-        speakPeriodSwitch = makeSwitch(root, "播报时段词（凌晨/上午/下午…）", extras.speakPeriod)
+        timeSwitch = makeSwitch(root, "播报时间内容（总开关，关闭后不念时间/日期/星期）", extras.timeEnabled)
+        speakClockSwitch = makeSwitch(root, "  时间（时:分）", extras.speakClock)
+        speakDateSwitch = makeSwitch(root, "  日期（月日）", extras.speakDate)
+        speakWeekdaySwitch = makeSwitch(root, "  星期", extras.speakWeekday)
+        speakPeriodSwitch = makeSwitch(root, "  时段词（凌晨/上午/下午…）", extras.speakPeriod)
+        // 总开关关闭时，子项置灰，避免误以为还能生效
+        timeSwitch?.setOnCheckedChangeListener { _, checked ->
+            setTimeDetailEnabled(checked)
+            onSettingChanged()
+        }
+        setTimeDetailEnabled(extras.timeEnabled)
 
         // 天气总开关
         addLabel(root, "天气", 16f)
 
-        weatherSwitch = makeSwitch(root, "播报天气（Open-Meteo，免密钥）", extras.weatherEnabled)
-        speakWeatherTextSwitch = makeSwitch(root, "天气现象（多云/小雨）", extras.speakWeatherText)
-        speakTemperatureSwitch = makeSwitch(root, "当前气温", extras.speakTemperature)
-        speakApparentSwitch = makeSwitch(root, "体感温度", extras.speakApparent)
-        speakPrecipitationSwitch = makeSwitch(root, "降水量", extras.speakPrecipitation)
+        weatherSwitch = makeSwitch(root, "播报天气内容（总开关，关闭后不定位、不请求天气）", extras.weatherEnabled)
+        speakWeatherTextSwitch = makeSwitch(root, "  天气现象（多云/小雨）", extras.speakWeatherText)
+        speakTemperatureSwitch = makeSwitch(root, "  当前气温", extras.speakTemperature)
+        speakApparentSwitch = makeSwitch(root, "  体感温度", extras.speakApparent)
+        speakPrecipitationSwitch = makeSwitch(root, "  降水量", extras.speakPrecipitation)
 
         autoLocateSwitch = Switch(this)
         autoLocateSwitch?.text = "自动定位（前台粗定位）"
@@ -187,6 +195,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
         })
         root.addView(cityInput)
+
+        // 天气总开关与子项联动：关闭后子项与定位置灰
+        weatherSwitch?.setOnCheckedChangeListener { _, checked ->
+            setWeatherDetailEnabled(checked)
+            onSettingChanged()
+        }
+        setWeatherDetailEnabled(extras.weatherEnabled)
 
         addLabel(root, "节气", 16f)
         solarTermSwitch = makeSwitch(root, "播报二十四节气", extras.solarTermEnabled)
@@ -501,8 +516,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         if (requestCode != REQUEST_PICK_CHIME || resultCode != RESULT_OK) return
         try {
             val uri: Uri? = data?.getParcelableExtra(RingtoneManager.EXTRA_RINGTONE_PICKED_URI)
-            if (uri == null) {
-                statusView?.text = "未选择提示音，保持原设置"
+            // 部分 ROM 在选择「默认」时返回 Uri.EMPTY 而不是 null，
+            // 若直接保存会得到空 URI，播放时静默回退成内置提示音。
+            if (uri == null || uri == Uri.EMPTY || uri.toString().isBlank()) {
+                statusView?.text = "未选择有效提示音，保持原设置"
                 return
             }
             val label = try {
@@ -519,6 +536,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             refreshWaveform()
             notifyServiceReload()
             statusView?.text = "提示音已设为：$label"
+            // 读取系统铃声需要音频权限，缺失会导致播放回退成内置音
+            ensureAudioReadPermission()
         } catch (error: Throwable) {
             statusView?.text = "保存提示音失败：${error.message}"
         }
@@ -532,6 +551,10 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 statusView?.text = "当前为「不播提示音」，不会发出声音"
                 return
             }
+            if (extras.chimeSource == ChimeSource.SYSTEM && extras.chimeUri.isBlank()) {
+                statusView?.text = "已选「系统铃声」但没有有效铃声，请重新点击上方提示音按钮选择"
+                return
+            }
             focus().request(extras.duckOthers)
             statusView?.text = "正在试听提示音…"
             // 波形跟随播放进度动画
@@ -543,7 +566,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     chime().setProgressCallback(null)
                     waveformView?.setProgress(0f)
                     focusHelper?.release()
-                    statusView?.text = "提示音试听完成"
+                    val problem = chime().lastProblem
+                    statusView?.text = if (problem.isNullOrBlank()) {
+                        "提示音试听完成"
+                    } else {
+                        "已用内置提示音试听：$problem"
+                    }
                 }
             }
         } catch (error: Throwable) {
@@ -567,7 +595,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             Settings.saveExtras(
                 this,
                 current.copy(
-                    // 时间细粒度
+                    // 时间总开关 + 细粒度
+                    timeEnabled = timeSwitch?.isChecked ?: current.timeEnabled,
                     speakClock = speakClockSwitch?.isChecked ?: current.speakClock,
                     speakDate = speakDateSwitch?.isChecked ?: current.speakDate,
                     speakWeekday = speakWeekdaySwitch?.isChecked ?: current.speakWeekday,
@@ -655,6 +684,27 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return button
     }
 
+    /** 时间总开关联动：关闭时把子项置灰。 */
+    private fun setTimeDetailEnabled(enabled: Boolean) {        for (view in listOf(
+            speakClockSwitch, speakDateSwitch, speakWeekdaySwitch, speakPeriodSwitch
+        )) {
+            view?.isEnabled = enabled
+            view?.alpha = if (enabled) 1f else 0.45f
+        }
+    }
+
+    /** 天气总开关联动：关闭时把子项与定位置灰。 */
+    private fun setWeatherDetailEnabled(enabled: Boolean) {
+        for (view in listOf(
+            speakWeatherTextSwitch, speakTemperatureSwitch,
+            speakApparentSwitch, speakPrecipitationSwitch,
+            autoLocateSwitch, cityInput
+        )) {
+            view?.isEnabled = enabled
+            view?.alpha = if (enabled) 1f else 0.45f
+        }
+    }
+
     /** 创建一个带自动保存的开关，并添加到指定容器。 */
     private fun makeSwitch(parent: LinearLayout, text: String, checked: Boolean): Switch {
         val view = Switch(this)
@@ -673,10 +723,37 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             ) {
                 wanted.add(Manifest.permission.POST_NOTIFICATIONS)
             }
-            if (checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            val extras = Settings.extras(this)
+            // 只有确实要播天气时才申请定位
+            if (extras.hasWeatherContent &&
+                checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            ) {
                 wanted.add(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
+            // 只有选了系统铃声时才需要音频读取权限
+            if (extras.chimeSource == ChimeSource.SYSTEM && extras.chimeUri.isNotBlank() &&
+                checkSelfPermission(audioReadPermission()) != PackageManager.PERMISSION_GRANTED
+            ) {
+                wanted.add(audioReadPermission())
+            }
             if (wanted.isNotEmpty()) requestPermissions(wanted.toTypedArray(), 10)
+        } catch (_: Throwable) {
+            // 忽略
+        }
+    }
+
+    /** 读取系统铃声所需的音频权限：Android 13 起按媒体类型细分。 */
+    private fun audioReadPermission(): String =
+        if (Build.VERSION.SDK_INT >= 33) {
+            Manifest.permission.READ_MEDIA_AUDIO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+
+    private fun ensureAudioReadPermission() {
+        try {
+            if (checkSelfPermission(audioReadPermission()) == PackageManager.PERMISSION_GRANTED) return
+            requestPermissions(arrayOf(audioReadPermission()), 11)
         } catch (_: Throwable) {
             // 忽略
         }
@@ -755,7 +832,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
 
             var weatherLine = ""
-            if (extras.weatherEnabled) {
+            if (extras.hasWeatherContent) {
                 weatherLine = try {
                     fetchWeatherLine(extras)
                 } catch (error: Throwable) {

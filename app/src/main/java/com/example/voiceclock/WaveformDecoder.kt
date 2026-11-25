@@ -37,6 +37,21 @@ object WaveformDecoder {
 
     /** 从 URI 解码（系统铃声等），返回振幅与总时长。 */
     fun decode(context: Context, uri: Uri, barCount: Int, sampleCount: Int): Result {
+        val direct = tryDecode(context, uri, barCount, sampleCount)
+        if (direct.amplitudes.isNotEmpty()) return direct
+
+        // 直接打开失败时（常见于 content:// 读不到流），先复制到缓存再解码。
+        if (uri.scheme != "file") {
+            val cached = tryCachedCopy(context, uri)
+            if (cached != null) {
+                val viaFile = tryDecode(context, Uri.fromFile(cached), barCount, sampleCount)
+                if (viaFile.amplitudes.isNotEmpty()) return viaFile
+            }
+        }
+        return direct
+    }
+
+    private fun tryDecode(context: Context, uri: Uri, barCount: Int, sampleCount: Int): Result {
         return try {
             val extractor = MediaExtractor()
             extractor.setDataSource(context, uri, null)
@@ -44,8 +59,25 @@ object WaveformDecoder {
             extractor.release()
             result
         } catch (error: Throwable) {
-            Log.w(TAG, "解码 URI 波形失败: $uri", error)
+            Log.w(TAG, "解码波形失败: $uri", error)
             Result(FloatArray(0), 0L)
+        }
+    }
+
+    /** 把 URI 内容复制到缓存文件，供 MediaExtractor 以文件方式读取。 */
+    private fun tryCachedCopy(context: Context, uri: Uri): File? {
+        return try {
+            val key = Integer.toHexString(uri.toString().hashCode())
+            val cached = File(context.cacheDir, "wave_$key.dat")
+            if (!cached.exists() || cached.length() == 0L) {
+                context.contentResolver.openInputStream(uri)?.use { src ->
+                    cached.outputStream().use { dst -> src.copyTo(dst, 64 * 1024) }
+                }
+            }
+            cached.takeIf { it.length() > 0L }
+        } catch (error: Throwable) {
+            Log.w(TAG, "波形缓存复制失败: $uri", error)
+            null
         }
     }
 

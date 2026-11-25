@@ -21,6 +21,8 @@ enum class ChimeSource { DEFAULT, SYSTEM, SILENT }
  */
 data class Extras(
     // ---- 时间 ----
+    /** 时间总开关：关闭后整块时间内容（时:分、日期、星期）都不播报。 */
+    val timeEnabled: Boolean = true,
     val speakClock: Boolean = true,
     val speakDate: Boolean = true,
     val speakWeekday: Boolean = true,
@@ -50,7 +52,11 @@ data class Extras(
 
     /** 时间部分是否有任何内容可播报。 */
     val hasTimeContent: Boolean
-        get() = speakClock || speakDate || speakWeekday || speakPeriod
+        get() = timeEnabled && (speakClock || speakDate || speakWeekday)
+
+    /** 时间细节里是否至少开了一项（用于界面提示总开关是否有意义）。 */
+    val hasTimeDetail: Boolean
+        get() = speakClock || speakDate || speakWeekday
 
     /** 天气部分是否有任何内容可播报。 */
     val hasWeatherContent: Boolean
@@ -101,6 +107,7 @@ object Settings {
         val sourceRaw = p.getString("chimeSource", ChimeSource.DEFAULT.name) ?: ChimeSource.DEFAULT.name
         val source = runCatching { ChimeSource.valueOf(sourceRaw) }.getOrDefault(ChimeSource.DEFAULT)
         return Extras(
+            timeEnabled = p.getBoolean("timeEnabled", true),
             speakClock = p.getBoolean("speakClock", true),
             speakDate = p.getBoolean("speakDate", true),
             speakWeekday = p.getBoolean("speakWeekday", true),
@@ -125,6 +132,7 @@ object Settings {
 
     fun saveExtras(context: Context, extras: Extras) {
         prefs(context).edit()
+            .putBoolean("timeEnabled", extras.timeEnabled)
             .putBoolean("speakClock", extras.speakClock)
             .putBoolean("speakDate", extras.speakDate)
             .putBoolean("speakWeekday", extras.speakWeekday)

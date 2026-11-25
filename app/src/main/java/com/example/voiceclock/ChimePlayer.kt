@@ -3,10 +3,12 @@ package com.example.voiceclock
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import java.io.File
 
 /**
  * 提示音播放器。
@@ -41,6 +43,13 @@ class ChimePlayer(context: Context) {
      */
     private var session: Int = 0
 
+    /**
+     * 最近一次播放遇到的问题（用于在界面上告知用户真实原因）。
+     * 每次 play() 开始时清空；系统铃声无法播放时会写明原因。
+     */
+    var lastProblem: String? = null
+        private set
+
     /** 设置播放进度回调（0f..1f），用于界面波形动画。传入 null 停止回调。 */
     fun setProgressCallback(callback: ((Float) -> Unit)?) {
         progressCallback = callback
@@ -51,6 +60,27 @@ class ChimePlayer(context: Context) {
     companion object {
         private const val TAG = "ChimePlayer"
         private const val PROGRESS_INTERVAL_MS = 50L
+        /** 铃声缓存文件的保留时长，超过即清理。 */
+        private const val CACHE_TTL_MS = 7L * 24 * 60 * 60 * 1000
+    }
+
+    init {
+        pruneCache()
+    }
+
+    /** 清理过期的铃声/波形缓存，避免长期占用存储。 */
+    private fun pruneCache() {
+        try {
+            val now = System.currentTimeMillis()
+            appContext.cacheDir.listFiles()?.forEach { file ->
+                val generated = file.name.startsWith("chime_") || file.name.startsWith("wave_")
+                if (generated && now - file.lastModified() > CACHE_TTL_MS) {
+                    file.delete()
+                }
+            }
+        } catch (_: Throwable) {
+            // 清理失败不影响播放
+        }
     }
 
     private fun audioAttributes(): AudioAttributes = AudioAttributes.Builder()
@@ -65,6 +95,7 @@ class ChimePlayer(context: Context) {
      */
     fun play(extras: Extras, onDone: () -> Unit) {
         release()
+        lastProblem = null
         // 开启新会话，之前所有在途的异步回调都会失效
         val token = ++session
         when (extras.chimeSource) {
@@ -99,11 +130,56 @@ class ChimePlayer(context: Context) {
         }
     }
 
+    /**
+     * 把 content:// 之类的 URI 复制成本地缓存文件。
+     *
+     * 直接让 MediaPlayer 打开 content:// 在部分机型（缺少音频读取权限、
+     * provider 返回流异常）会失败，失败后回退内置音，表现就是「试听只播默认提示音」。
+     * 复制成本地文件后统一走文件路径，行为稳定，波形解码也能复用同一份字节。
+     */
+    private fun materializeUri(uriString: String): File? {
+        return try {
+            val uri = Uri.parse(uriString)
+            val source: File? = if (uri.scheme == "file") {
+                uri.path?.let { path -> File(path).takeIf { it.exists() && it.length() > 0L } }
+            } else {
+                val key = Integer.toHexString(uriString.hashCode())
+                val cached = File(appContext.cacheDir, "chime_$key.dat")
+                if (!cached.exists() || cached.length() == 0L) {
+                    val input = appContext.contentResolver.openInputStream(uri)
+                    if (input == null) {
+                        null
+                    } else {
+                        input.use { src ->
+                            cached.outputStream().use { dst -> src.copyTo(dst, 64 * 1024) }
+                        }
+                        cached
+                    }
+                } else {
+                    cached
+                }
+            }
+            source?.takeIf { it.length() > 0L }
+        } catch (error: Throwable) {
+            Log.w(TAG, "系统铃声复制到缓存失败: $uriString", error)
+            null
+        }
+    }
+
     private fun playUri(uriString: String, maxSeconds: Int, token: Int, onDone: () -> Unit) {
+        // 先把 URI 落到本地缓存文件。content:// 直接交给 MediaPlayer，在缺少
+        // 音频读取权限或 provider 行为异常的机型上会失败，而失败被回退逻辑吞掉，
+        // 用户看到的就是「选了系统铃声，试听却只响内置提示音」。
+        val local = materializeUri(uriString)
+        if (local == null) {
+            lastProblem = "系统铃声无法读取（可能缺少音频读取权限，或文件已失效）"
+            playRaw(R.raw.time_chime, maxSeconds, token, onDone)
+            return
+        }
         val mp = MediaPlayer()
         try {
             mp.setAudioAttributes(audioAttributes())
-            mp.setDataSource(appContext, Uri.parse(uriString))
+            mp.setDataSource(local.absolutePath)
             mp.setOnPreparedListener { prepared ->
                 // 关键：迟到的 prepared 回调（用户已重新点试听）必须丢弃，
                 // 否则会与新的播放器同时出声，造成重叠。
@@ -130,6 +206,7 @@ class ChimePlayer(context: Context) {
                     // 忽略
                 }
                 if (player === errored) player = null
+                lastProblem = "系统铃声解码失败（what=$what），已改用内置提示音"
                 playRaw(R.raw.time_chime, maxSeconds, token, onDone)
                 true
             }
@@ -137,6 +214,7 @@ class ChimePlayer(context: Context) {
             player = mp
         } catch (error: Throwable) {
             Log.w(TAG, "无法加载系统铃声，回退内置提示音", error)
+            lastProblem = "系统铃声无法播放：${error.javaClass.simpleName}"
             try {
                 mp.release()
             } catch (_: Throwable) {

@@ -194,6 +194,12 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         val token = ++buildToken
         val extras = Settings.extras(this)
 
+        // 所有内容都关闭时不播提示音、也不念空句子，避免无意义打扰
+        if (!extras.hasTimeContent && !extras.hasWeatherContent && !extras.solarTermEnabled) {
+            releaseWakeLock()
+            return
+        }
+
         // 整体超时兜底：定位 + 网络不应无限等待。
         val timeout = Runnable {
             if (token == buildToken && activeId == null) {
@@ -207,7 +213,8 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         handler.postDelayed(timeout, 12_000)
 
         io.execute {
-            val weather = if (extras.weatherEnabled) resolveWeather(extras) else null
+            // 总开关或全部细节都关闭时，不定位也不请求网络
+            val weather = if (extras.hasWeatherContent) resolveWeather(extras) else null
             val fallback = if (weather == null) cachedWeatherSentence(extras) else null
             handler.post {
                 if (token != buildToken) return@post
@@ -231,6 +238,7 @@ class ClockService : Service(), TextToSpeech.OnInitListener {
         }
         player.play(extras) {
             handler.post {
+                player.lastProblem?.let { android.util.Log.w("ClockService", "提示音回退：$it") }
                 if (token != buildToken) return@post
                 speakText(text, source, now, token)
             }

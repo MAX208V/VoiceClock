@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/surface</item>
+        <item name="waveColor">@color/wave_wave</item>
+        <item name="waveProgressColor">@color/wave_progress</item>
+        <item name="waveBackColor">@color/wave_back</item>
+        <item name="waveCutColor">@color/wave_cut</item>
+        <item name="waveTextColor">@color/wave_text</item>
+    </style>
+</resources>

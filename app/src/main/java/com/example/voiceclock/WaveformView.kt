@@ -45,17 +45,27 @@ class WaveformView @JvmOverloads constructor(
     /** 用户拖选时长后的回调（毫秒，等于总时长表示完整播放）。 */
     var onCutChanged: ((Long, Long) -> Unit)? = null
 
+    /** 从主题属性读取颜色；属性缺失时回落到浅色默认值。 */
+    private fun themeColor(attr: Int, fallback: Int): Int {
+        val typed = context.obtainStyledAttributes(intArrayOf(attr))
+        return try {
+            typed.getColor(0, fallback)
+        } finally {
+            typed.recycle()
+        }
+    }
+
     private val barPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xFF000000.toInt()
+        color = themeColor(R.attr.waveColor, 0xFF1A1A1A.toInt())
     }
     private val playedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xFF4A90D9.toInt()
+        color = themeColor(R.attr.waveProgressColor, 0xFF4A90D9.toInt())
     }
     private val idlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xFFCCCCCC.toInt()
+        color = themeColor(R.attr.waveBackColor, 0xFFE8E8E8.toInt())
     }
 
     /** 振幅数据，范围 0f..1f。 */
@@ -70,7 +80,7 @@ class WaveformView @JvmOverloads constructor(
     private val cutPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeWidth = 3f
-        color = 0xFFE57373.toInt()
+        color = themeColor(R.attr.waveCutColor, 0xFFE57373.toInt())
     }
 
     private var loading = false
@@ -82,13 +92,13 @@ class WaveformView @JvmOverloads constructor(
 
     /** 刻度与提示文字画笔。 */
     private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF666666.toInt()
+        color = themeColor(R.attr.waveTextColor, 0xFF666666.toInt())
         textSize = 24f
     }
 
     private val handlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
-        color = 0xFFE57373.toInt()
+        color = themeColor(R.attr.waveCutColor, 0xFFE57373.toInt())
     }
 
     /** 可交互模式：显示拖动标记并响应触摸。设置为 false 时仅做展示。 */

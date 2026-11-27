@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 深色模式：底深、波形浅，保证对比度 -->
+    <color name="surface">#FF121212</color>
+    <color name="wave_wave">#FFE8E8E8</color>
+    <color name="wave_progress">#FF6FB3F2</color>
+    <color name="wave_back">#FF2A2A2A</color>
+    <color name="wave_cut">#FFFF8A80</color>
+    <color name="wave_text">#FFB0B0B0</color>
+    <color name="divider">#33FFFFFF</color>
+</resources>

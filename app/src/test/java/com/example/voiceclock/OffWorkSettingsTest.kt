@@ -332,6 +332,95 @@ class OffWorkSettingsTest {
         assertEquals(origin, back)
     }
 
+    // ---------- 休息前提醒 / 任意分钟数 ----------
+
+    @Test fun beforeBreakUsesNaturalGapStart() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(
+                TimeRange(9, 0, 12, 0, remindBeforeBreak = true, advanceBreakMinutes = 7),
+                TimeRange(13, 30, 18, 0)
+            ),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val beforeBreak = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0)
+            .first { it.kind == ReminderKind.BEFORE_BREAK }
+        // 自然间隙休息开始 = 12:00，提前 7 分钟 = 11:53
+        assertEquals(11, beforeBreak.at.hour)
+        assertEquals(53, beforeBreak.at.minute)
+        assertEquals(7, beforeBreak.minutes)
+    }
+
+    @Test fun beforeBreakUsesCustomBreakStart() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(
+                TimeRange(9, 0, 12, 0,
+                    remindBeforeBreak = true, advanceBreakMinutes = 20,
+                    breakStartMinuteOfDay = 12 * 60 + 30,
+                    breakEndMinuteOfDay = 13 * 60 + 30),
+                TimeRange(13, 30, 18, 0)
+            ),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val beforeBreak = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0)
+            .first { it.kind == ReminderKind.BEFORE_BREAK }
+        // 自定义休息开始 12:30，提前 20 分钟 = 12:10
+        assertEquals(12, beforeBreak.at.hour)
+        assertEquals(10, beforeBreak.at.minute)
+    }
+
+    @Test fun beforeBreakWhenLastRangeProducesNothing() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0, remindBeforeBreak = true, advanceBreakMinutes = 5)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val kinds = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0).map { it.kind }
+        assertFalse("单段没有休息，不应有休息前提醒", kinds.contains(ReminderKind.BEFORE_BREAK))
+    }
+
+    @Test fun arbitraryAdvanceMinutesAreHonoured() {
+        // 非整档的分钟数（如 7、13、23）必须原样生效
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0,
+                remindWorkStart = true, remindBeforeStart = true, advanceStartMinutes = 23,
+                remindBeforeEnd = true, advanceEndMinutes = 13)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val reminders = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0)
+        val beforeStart = reminders.first { it.kind == ReminderKind.BEFORE_START }
+        assertEquals(8, beforeStart.at.hour)
+        assertEquals(37, beforeStart.at.minute)
+        val beforeEnd = reminders.first { it.kind == ReminderKind.BEFORE_END }
+        assertEquals(17, beforeEnd.at.hour)
+        assertEquals(47, beforeEnd.at.minute)
+    }
+
+    @Test fun beforeBreakText() {
+        assertEquals("还有 8 分钟休息", ReminderKind.BEFORE_BREAK.text(8))
+    }
+
+    @Test fun encodeDecodeKeepsBeforeBreakFields() {
+        val origin = TimeRange(9, 0, 12, 0,
+            remindBeforeBreak = true, advanceBreakMinutes = 17,
+            breakStartMinuteOfDay = 12 * 60, breakEndMinuteOfDay = 13 * 60)
+        val back = OffWorkSettingsStorage.decodeRangeForTest(
+            OffWorkSettingsStorage.encodeRangeForTest(origin)
+        )
+        assertEquals(origin, back)
+    }
+
+    @Test fun advanceMinutesAreClampedToUpperBound() {
+        // 超出上限的值在解码时应被钳制，避免异常数据导致离谱排程
+        val encoded = "9,0,18,0,1,999,999,0,0,1,1,1,1,0,1,-1,-1,0,999"
+        val decoded = OffWorkSettingsStorage.decodeRangeForTest(encoded)
+        assertEquals(MAX_ADVANCE_MINUTES, decoded!!.advanceStartMinutes)
+        assertEquals(MAX_ADVANCE_MINUTES, decoded.advanceEndMinutes)
+        assertEquals(MAX_ADVANCE_MINUTES, decoded.advanceBreakMinutes)
+    }
+
     @Test fun vibrateDefaults() {
         val settings = OffWorkSettings()
         assertTrue(settings.vibrate)

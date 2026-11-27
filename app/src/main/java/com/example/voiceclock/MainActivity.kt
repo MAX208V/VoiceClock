@@ -864,8 +864,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 updateRange(index) { it.copy(startHour = h, startMinute = m) }
             }, range.startHour, range.startMinute, true).show()
         }
-        startDetail.addView(reminderCheck("上班前提醒（提前 ${range.advanceStartMinutes} 分钟）",
-            range.remindBeforeStart) { checked -> updateRange(index) { it.copy(remindBeforeStart = checked) } })
+        startDetail.addView(reminderCheck("上班前提醒", range.remindBeforeStart) { checked ->
+            updateRange(index) { it.copy(remindBeforeStart = checked) }
+        })
+        if (range.remindBeforeStart) {
+            startDetail.addView(advanceInput(
+                label = "提前",
+                value = range.advanceStartMinutes
+            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceStartMinutes = minutes) } })
+        }
         startDetail.addView(reminderCheck("上班到点提醒", range.remindOnStart) { checked ->
             updateRange(index) { it.copy(remindOnStart = checked) }
         })
@@ -894,8 +901,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 updateRange(index) { it.copy(endHour = h, endMinute = m) }
             }, range.endHour, range.endMinute, true).show()
         }
-        endDetail.addView(reminderCheck("下班前提醒（提前 ${range.advanceEndMinutes} 分钟）",
-            range.remindBeforeEnd) { checked -> updateRange(index) { it.copy(remindBeforeEnd = checked) } })
+        endDetail.addView(reminderCheck("下班前提醒", range.remindBeforeEnd) { checked ->
+            updateRange(index) { it.copy(remindBeforeEnd = checked) }
+        })
+        if (range.remindBeforeEnd) {
+            endDetail.addView(advanceInput(
+                label = "提前",
+                value = range.advanceEndMinutes
+            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceEndMinutes = minutes) } })
+        }
         endDetail.addView(reminderCheck("下班到点提醒", range.remindOnEnd) { checked ->
             updateRange(index) { it.copy(remindOnEnd = checked) }
         })
@@ -917,6 +931,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         breakDetail.orientation = LinearLayout.VERTICAL
         breakDetail.visibility = if (breakMaster.isChecked) View.VISIBLE else View.GONE
 
+        breakDetail.addView(reminderCheck("休息前提醒", range.remindBeforeBreak) { checked ->
+            updateRange(index) { it.copy(remindBeforeBreak = checked) }
+        })
+        if (range.remindBeforeBreak) {
+            breakDetail.addView(advanceInput(
+                label = "提前",
+                value = range.advanceBreakMinutes
+            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceBreakMinutes = minutes) } })
+        }
         breakDetail.addView(reminderCheck("休息开始提醒", range.remindBreakStart) { checked ->
             updateRange(index) { it.copy(remindBreakStart = checked) }
         })
@@ -965,10 +988,63 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val divider = View(this)
         divider.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
-        divider.setBackgroundColor(0x22000000)
+        divider.setBackgroundColor(themeDividerColor())
         card.addView(divider)
 
         return card
+    }
+
+    /**
+     * 提前分钟数输入框。
+     *
+     * 用防抖保存：输入过程中不写盘、不重排闹钟，停顿 500ms 后才提交，
+     * 避免每敲一个字符就触发一次 schedule()。
+     */
+    private fun advanceInput(label: String, value: Int, onChange: (Int) -> Unit): View {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = android.view.Gravity.CENTER_VERTICAL
+
+        val title = TextView(this)
+        title.text = "$label"
+        row.addView(title)
+
+        val input = EditText(this)
+        input.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        input.setText(value.toString())
+        input.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        row.addView(input)
+
+        val unit = TextView(this)
+        unit.text = " 分钟（0 表示不提醒）"
+        unit.textSize = 12f
+        row.addView(unit)
+
+        // 只写存储、不重建界面，否则输入框会在用户打字时被销毁重建，焦点丢失。
+        fun commit(raw: String?) {
+            val parsed = raw?.trim()?.toIntOrNull() ?: 0
+            onChange(parsed.coerceIn(0, MAX_ADVANCE_MINUTES))
+        }
+
+        var pending: Runnable? = null
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
+            override fun afterTextChanged(s: Editable?) {
+                pending?.let { mainHandler.removeCallbacks(it) }
+                val task = Runnable { commit(s?.toString()) }
+                pending = task
+                mainHandler.postDelayed(task, 600)
+            }
+        })
+        // 失焦时立刻落盘，避免用户改完就去点别处导致没保存
+        input.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                pending?.let { mainHandler.removeCallbacks(it) }
+                commit(input.text?.toString())
+            }
+        }
+        return row
     }
 
     /** 生成一个带回调的复选框。 */
@@ -980,18 +1056,33 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         return box
     }
 
+    /** 主题分隔线颜色：深色模式下用白透明，浅色模式下用黑透明。 */
+    private fun themeDividerColor(): Int = try {
+        val typed = obtainStyledAttributes(intArrayOf(R.color.divider))
+        val value = typed.getColor(0, 0x22000000)
+        typed.recycle()
+        value
+    } catch (_: Throwable) {
+        0x22000000
+    }
+
     /** 分钟数（0 点起算）转 HH:mm。 */
     private fun minuteLabel(minuteOfDay: Int): String =
         String.format(Locale.US, "%02d:%02d", minuteOfDay / 60, minuteOfDay % 60)
 
-    /** 更新指定下标的时段并重新渲染。 */
-    private fun updateRange(index: Int, transform: (TimeRange) -> TimeRange) {
+    /**
+     * 更新指定下标的时段。
+     *
+     * @param rebuild 是否重建列表。输入框改分钟数时传 false，
+     *   否则会销毁正在编辑的输入框、导致焦点丢失。
+     */
+    private fun updateRange(index: Int, rebuild: Boolean = true, transform: (TimeRange) -> TimeRange) {
         val current = OffWorkSettingsStorage.load(this)
         val ranges = current.ranges.toMutableList()
         val existing = ranges.getOrNull(index) ?: return
         ranges[index] = transform(existing)
         OffWorkSettingsStorage.save(this, current.copy(ranges = ranges))
-        rebuildOffWorkRanges()
+        if (rebuild) rebuildOffWorkRanges()
         onSettingChanged()
     }
 

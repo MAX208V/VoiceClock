@@ -13,7 +13,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <queries><intent><action android:name="android.intent.action.TTS_SERVICE" /></intent></queries>
     <application
-        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:theme="@style/AppTheme"
         android:label="语音报时"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"

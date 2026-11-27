@@ -5,6 +5,9 @@ import java.time.ZonedDateTime
 
 enum class VibrateMode { SHORT, LONG, DOUBLE }
 
+/** 提前提醒分钟数的上限，避免误填过大。 */
+const val MAX_ADVANCE_MINUTES = 180
+
 /** 提醒种类。文案在此集中定义，避免多处硬编码不一致。 */
 enum class ReminderKind {
     /** 上班前 N 分钟。 */
@@ -18,7 +21,9 @@ enum class ReminderKind {
     /** 休息开始（上一段下班那一刻）。 */
     BREAK_START,
     /** 休息结束（下一段上班那一刻）。 */
-    BREAK_END;
+    BREAK_END,
+    /** 休息前 N 分钟。 */
+    BEFORE_BREAK;
 
     /** 播报正文。 */
     fun text(minutes: Int): String = when (this) {
@@ -28,6 +33,7 @@ enum class ReminderKind {
         ON_END -> "下班时间到了"
         BREAK_START -> "休息时间到了"
         BREAK_END -> "休息结束，继续上班"
+        BEFORE_BREAK -> "还有 $minutes 分钟休息"
     }
 }
 
@@ -57,6 +63,10 @@ data class TimeRange(
     val remindOnEnd: Boolean = true,
     val remindBreakStart: Boolean = true,
     val remindBreakEnd: Boolean = true,
+    /** 休息前提醒（提前 N 分钟）。 */
+    val remindBeforeBreak: Boolean = false,
+    /** 提前多少分钟提醒休息（0 表示不提前）。 */
+    val advanceBreakMinutes: Int = 5,
     /**
      * 自定义休息区间（分钟，从 0 点起算）。
      * 为空表示按相邻时段之间的自然间隙休息。
@@ -170,13 +180,21 @@ data class OffWorkSettings(
                 if (range.hasCustomBreak) {
                     val breakStart = minuteOfDay(day, range.breakStartMinuteOfDay)
                     val breakEnd = minuteOfDay(day, range.breakEndMinuteOfDay)
+                    if (range.remindBeforeBreak && range.advanceBreakMinutes > 0) {
+                        add(result, now, breakStart.minusMinutes(range.advanceBreakMinutes.toLong()),
+                            ReminderKind.BEFORE_BREAK, range.advanceBreakMinutes)
+                    }
                     if (range.remindBreakStart) add(result, now, breakStart, ReminderKind.BREAK_START)
                     if (range.remindBreakEnd) add(result, now, breakEnd, ReminderKind.BREAK_END)
                 } else if (!anyCustomBreak) {
                     // 自然间隙：这一段的结束 → 休息开始；下一段的开始 → 休息结束。
                     // 只要任一时刻段自定义了休息时间，就整体改用自定义，避免两套规则叠加出重复提醒。
-                    if (hasBreakAfter[index] && range.remindBreakStart) {
-                        add(result, now, end, ReminderKind.BREAK_START)
+                    if (hasBreakAfter[index]) {
+                        if (range.remindBeforeBreak && range.advanceBreakMinutes > 0) {
+                            add(result, now, end.minusMinutes(range.advanceBreakMinutes.toLong()),
+                                ReminderKind.BEFORE_BREAK, range.advanceBreakMinutes)
+                        }
+                        if (range.remindBreakStart) add(result, now, end, ReminderKind.BREAK_START)
                     }
                     if (index > 0 && range.remindBreakEnd) {
                         add(result, now, start, ReminderKind.BREAK_END)
@@ -266,7 +284,9 @@ object OffWorkSettingsStorage {
         if (r.remindWorkStart) 1 else 0,
         if (r.remindWorkEnd) 1 else 0,
         r.breakStartMinuteOfDay,
-        r.breakEndMinuteOfDay
+        r.breakEndMinuteOfDay,
+        if (r.remindBeforeBreak) 1 else 0,
+        r.advanceBreakMinutes
     ).joinToString(",")
 
     private fun decodeRange(text: String): TimeRange? {
@@ -278,8 +298,8 @@ object OffWorkSettingsStorage {
             endHour = v[2].coerceIn(0, 23),
             endMinute = v[3].coerceIn(0, 59),
             enabled = v[4] == 1,
-            advanceStartMinutes = v[5].coerceAtLeast(0),
-            advanceEndMinutes = v[6].coerceAtLeast(0),
+            advanceStartMinutes = v[5].coerceIn(0, MAX_ADVANCE_MINUTES),
+            advanceEndMinutes = v[6].coerceIn(0, MAX_ADVANCE_MINUTES),
             remindBeforeStart = v[7] == 1,
             remindOnStart = v[8] == 1,
             remindBeforeEnd = v[9] == 1,
@@ -290,7 +310,9 @@ object OffWorkSettingsStorage {
             remindWorkStart = v.getOrNull(13)?.let { it == 1 } ?: false,
             remindWorkEnd = v.getOrNull(14)?.let { it == 1 } ?: true,
             breakStartMinuteOfDay = v.getOrNull(15) ?: -1,
-            breakEndMinuteOfDay = v.getOrNull(16) ?: -1
+            breakEndMinuteOfDay = v.getOrNull(16) ?: -1,
+            remindBeforeBreak = v.getOrNull(17)?.let { it == 1 } ?: false,
+            advanceBreakMinutes = (v.getOrNull(18) ?: 5).coerceIn(0, MAX_ADVANCE_MINUTES)
         )
     }
 

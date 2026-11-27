@@ -47,13 +47,27 @@ data class TimeRange(
     val advanceStartMinutes: Int = 10,
     /** 提前多少分钟提醒下班（0 表示不提前）。 */
     val advanceEndMinutes: Int = 5,
+    /** 上班提醒总开关：关闭后 BEFORE_START / ON_START 都不播。 */
+    val remindWorkStart: Boolean = false,
+    /** 下班提醒总开关：关闭后 BEFORE_END / ON_END 都不播。 */
+    val remindWorkEnd: Boolean = true,
     val remindBeforeStart: Boolean = false,
     val remindOnStart: Boolean = false,
     val remindBeforeEnd: Boolean = true,
     val remindOnEnd: Boolean = true,
     val remindBreakStart: Boolean = true,
-    val remindBreakEnd: Boolean = true
+    val remindBreakEnd: Boolean = true,
+    /**
+     * 自定义休息区间（分钟，从 0 点起算）。
+     * 为空表示按相邻时段之间的自然间隙休息。
+     */
+    val breakStartMinuteOfDay: Int = -1,
+    val breakEndMinuteOfDay: Int = -1
 ) {
+    /** 是否使用了自定义休息时间。 */
+    val hasCustomBreak: Boolean
+        get() = breakStartMinuteOfDay in 0..1439 && breakEndMinuteOfDay in 0..1439
+
     fun startOn(day: ZonedDateTime): ZonedDateTime =
         day.withHour(startHour).withMinute(startMinute).withSecond(0).withNano(0)
 
@@ -122,6 +136,8 @@ data class OffWorkSettings(
         val hasBreakAfter = BooleanArray(active.size) { index ->
             index + 1 < active.size
         }
+        // 只要有任意一段自定义了休息时间，就统一按自定义排，不再推导自然间隙
+        val anyCustomBreak = active.any { it.hasCustomBreak }
 
         val result = ArrayList<Reminder>()
         for (dayOffset in 0..days) {
@@ -132,29 +148,39 @@ data class OffWorkSettings(
                 val start = range.startOn(day)
                 val end = if (range.crossesMidnight) range.endOn(day).plusDays(1) else range.endOn(day)
 
-                // 上班前
-                if (range.remindBeforeStart && range.advanceStartMinutes > 0) {
-                    add(result, now, start.minusMinutes(range.advanceStartMinutes.toLong()),
-                        ReminderKind.BEFORE_START, range.advanceStartMinutes)
+                // 上班前 / 上班到点：受「上班提醒」总开关约束
+                if (range.remindWorkStart) {
+                    if (range.remindBeforeStart && range.advanceStartMinutes > 0) {
+                        add(result, now, start.minusMinutes(range.advanceStartMinutes.toLong()),
+                            ReminderKind.BEFORE_START, range.advanceStartMinutes)
+                    }
+                    if (range.remindOnStart) add(result, now, start, ReminderKind.ON_START)
                 }
-                // 上班到点
-                if (range.remindOnStart) add(result, now, start, ReminderKind.ON_START)
 
-                // 下班前
-                if (range.remindBeforeEnd && range.advanceEndMinutes > 0) {
-                    add(result, now, end.minusMinutes(range.advanceEndMinutes.toLong()),
-                        ReminderKind.BEFORE_END, range.advanceEndMinutes)
+                // 下班前：受「下班提醒」总开关约束
+                if (range.remindWorkEnd) {
+                    if (range.remindBeforeEnd && range.advanceEndMinutes > 0) {
+                        add(result, now, end.minusMinutes(range.advanceEndMinutes.toLong()),
+                            ReminderKind.BEFORE_END, range.advanceEndMinutes)
+                    }
+                    if (range.remindOnEnd) add(result, now, end, ReminderKind.ON_END)
                 }
-                // 下班到点；若后面还有一段，这一时刻同时是「休息开始」
-                val hasNext = hasBreakAfter[index]
-                if (hasNext && range.remindBreakStart) {
-                    add(result, now, end, ReminderKind.BREAK_START)
-                } else if (range.remindOnEnd) {
-                    add(result, now, end, ReminderKind.ON_END)
-                }
-                // 休息结束 = 下一段上班时刻
-                if (index > 0 && active[index - 1].enabled && range.remindBreakEnd) {
-                    add(result, now, start, ReminderKind.BREAK_END)
+
+                // 休息：若配置了自定义区间，用自定义时间；否则用相邻时段间隙
+                if (range.hasCustomBreak) {
+                    val breakStart = minuteOfDay(day, range.breakStartMinuteOfDay)
+                    val breakEnd = minuteOfDay(day, range.breakEndMinuteOfDay)
+                    if (range.remindBreakStart) add(result, now, breakStart, ReminderKind.BREAK_START)
+                    if (range.remindBreakEnd) add(result, now, breakEnd, ReminderKind.BREAK_END)
+                } else if (!anyCustomBreak) {
+                    // 自然间隙：这一段的结束 → 休息开始；下一段的开始 → 休息结束。
+                    // 只要任一时刻段自定义了休息时间，就整体改用自定义，避免两套规则叠加出重复提醒。
+                    if (hasBreakAfter[index] && range.remindBreakStart) {
+                        add(result, now, end, ReminderKind.BREAK_START)
+                    }
+                    if (index > 0 && range.remindBreakEnd) {
+                        add(result, now, start, ReminderKind.BREAK_END)
+                    }
                 }
             }
         }
@@ -163,6 +189,10 @@ data class OffWorkSettings(
 
     /** 下一次提醒（供界面展示）。 */
     fun nextReminder(now: ZonedDateTime): Reminder? = upcomingReminders(now).firstOrNull()
+
+    /** 把「当天第几分钟」换算成具体时刻。 */
+    private fun minuteOfDay(day: ZonedDateTime, minuteOfDay: Int): ZonedDateTime =
+        day.withHour(minuteOfDay / 60).withMinute(minuteOfDay % 60).withSecond(0).withNano(0)
 
     /** 按 kind 取对应的开关。 */
     private fun add(
@@ -232,7 +262,11 @@ object OffWorkSettingsStorage {
         if (r.remindBeforeEnd) 1 else 0,
         if (r.remindOnEnd) 1 else 0,
         if (r.remindBreakStart) 1 else 0,
-        if (r.remindBreakEnd) 1 else 0
+        if (r.remindBreakEnd) 1 else 0,
+        if (r.remindWorkStart) 1 else 0,
+        if (r.remindWorkEnd) 1 else 0,
+        r.breakStartMinuteOfDay,
+        r.breakEndMinuteOfDay
     ).joinToString(",")
 
     private fun decodeRange(text: String): TimeRange? {
@@ -251,9 +285,19 @@ object OffWorkSettingsStorage {
             remindBeforeEnd = v[9] == 1,
             remindOnEnd = v[10] == 1,
             remindBreakStart = v[11] == 1,
-            remindBreakEnd = v[12] == 1
+            remindBreakEnd = v[12] == 1,
+            // 新增字段：旧数据只有 13 个值时用默认，保证向后兼容
+            remindWorkStart = v.getOrNull(13)?.let { it == 1 } ?: false,
+            remindWorkEnd = v.getOrNull(14)?.let { it == 1 } ?: true,
+            breakStartMinuteOfDay = v.getOrNull(15) ?: -1,
+            breakEndMinuteOfDay = v.getOrNull(16) ?: -1
         )
     }
+
+    /** 仅供单元测试使用：暴露编码/解码，验证向后兼容。 */
+    internal fun encodeRangeForTest(r: TimeRange): String = encodeRange(r)
+
+    internal fun decodeRangeForTest(text: String): TimeRange? = decodeRange(text)
 
     fun save(context: Context, settings: OffWorkSettings) {
         prefs(context).edit()

@@ -817,7 +817,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
     }
 
-    /** 单个时段的编辑卡片。 */
+    /**
+     * 单个时段的编辑卡片。
+     *
+     * 交互：上班/下班/休息三个总开关控制各自细则的显示，
+     * 收起时只留一行标题，避免一屏塞满复选框。
+     */
     private fun buildRangeRow(index: Int, range: TimeRange): View {
         val card = LinearLayout(this)
         card.orientation = LinearLayout.VERTICAL
@@ -842,84 +847,142 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         titleRow.addView(delete)
         card.addView(titleRow)
 
-        // 上班时刻
+        // ---- 上班 ----
+        val workStartMaster = CheckBox(this)
+        workStartMaster.text = "上班提醒"
+        workStartMaster.isChecked = range.remindWorkStart
+        card.addView(workStartMaster)
+
+        val startDetail = LinearLayout(this)
+        startDetail.orientation = LinearLayout.VERTICAL
+        startDetail.visibility = if (range.remindWorkStart) View.VISIBLE else View.GONE
+
         val startButton = Button(this)
-        startButton.text = "上班 ${String.format(Locale.US, "%02d:%02d", range.startHour, range.startMinute)}"
+        startButton.text = "上班时刻 ${String.format(Locale.US, "%02d:%02d", range.startHour, range.startMinute)}"
         startButton.setOnClickListener {
             TimePickerDialog(this, { _, h, m ->
                 updateRange(index) { it.copy(startHour = h, startMinute = m) }
             }, range.startHour, range.startMinute, true).show()
         }
-        card.addView(startButton)
+        startDetail.addView(reminderCheck("上班前提醒（提前 ${range.advanceStartMinutes} 分钟）",
+            range.remindBeforeStart) { checked -> updateRange(index) { it.copy(remindBeforeStart = checked) } })
+        startDetail.addView(reminderCheck("上班到点提醒", range.remindOnStart) { checked ->
+            updateRange(index) { it.copy(remindOnStart = checked) }
+        })
+        // 时刻按钮放在详情最前，收起时也同样可见，保证随时能改时间
+        startDetail.addView(startButton, 0)
+        card.addView(startDetail)
 
-        // 下班时刻
+        workStartMaster.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindWorkStart = checked) }
+        }
+
+        // ---- 下班 ----
+        val workEndMaster = CheckBox(this)
+        workEndMaster.text = "下班提醒"
+        workEndMaster.isChecked = range.remindWorkEnd
+        card.addView(workEndMaster)
+
+        val endDetail = LinearLayout(this)
+        endDetail.orientation = LinearLayout.VERTICAL
+        endDetail.visibility = if (range.remindWorkEnd) View.VISIBLE else View.GONE
+
         val endButton = Button(this)
-        endButton.text = "下班 ${String.format(Locale.US, "%02d:%02d", range.endHour, range.endMinute)}"
+        endButton.text = "下班时刻 ${String.format(Locale.US, "%02d:%02d", range.endHour, range.endMinute)}"
         endButton.setOnClickListener {
             TimePickerDialog(this, { _, h, m ->
                 updateRange(index) { it.copy(endHour = h, endMinute = m) }
             }, range.endHour, range.endMinute, true).show()
         }
-        card.addView(endButton)
-
-        // 提醒开关
-        val remindBeforeStart = CheckBox(this)
-        remindBeforeStart.text = "上班前提醒（提前 ${range.advanceStartMinutes} 分钟）"
-        remindBeforeStart.isChecked = range.remindBeforeStart
-        remindBeforeStart.setOnCheckedChangeListener { _, checked ->
-            updateRange(index) { it.copy(remindBeforeStart = checked) }
-        }
-        card.addView(remindBeforeStart)
-
-        val remindOnStart = CheckBox(this)
-        remindOnStart.text = "上班到点提醒"
-        remindOnStart.isChecked = range.remindOnStart
-        remindOnStart.setOnCheckedChangeListener { _, checked ->
-            updateRange(index) { it.copy(remindOnStart = checked) }
-        }
-        card.addView(remindOnStart)
-
-        val remindBeforeEnd = CheckBox(this)
-        remindBeforeEnd.text = "下班前提醒（提前 ${range.advanceEndMinutes} 分钟）"
-        remindBeforeEnd.isChecked = range.remindBeforeEnd
-        remindBeforeEnd.setOnCheckedChangeListener { _, checked ->
-            updateRange(index) { it.copy(remindBeforeEnd = checked) }
-        }
-        card.addView(remindBeforeEnd)
-
-        val remindOnEnd = CheckBox(this)
-        remindOnEnd.text = "下班到点提醒"
-        remindOnEnd.isChecked = range.remindOnEnd
-        remindOnEnd.setOnCheckedChangeListener { _, checked ->
+        endDetail.addView(reminderCheck("下班前提醒（提前 ${range.advanceEndMinutes} 分钟）",
+            range.remindBeforeEnd) { checked -> updateRange(index) { it.copy(remindBeforeEnd = checked) } })
+        endDetail.addView(reminderCheck("下班到点提醒", range.remindOnEnd) { checked ->
             updateRange(index) { it.copy(remindOnEnd = checked) }
-        }
-        card.addView(remindOnEnd)
+        })
+        endDetail.addView(endButton, 0)
+        card.addView(endDetail)
 
-        val remindBreakStart = CheckBox(this)
-        remindBreakStart.text = "休息开始提醒"
-        remindBreakStart.isChecked = range.remindBreakStart
-        remindBreakStart.setOnCheckedChangeListener { _, checked ->
+        workEndMaster.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindWorkEnd = checked) }
+        }
+
+        // ---- 休息 ----
+        val breakMaster = CheckBox(this)
+        breakMaster.text = "休息提醒"
+        // 休息没有单独的「总开关」字段，用「开始或结束任一开启」表示
+        breakMaster.isChecked = range.remindBreakStart || range.remindBreakEnd
+        card.addView(breakMaster)
+
+        val breakDetail = LinearLayout(this)
+        breakDetail.orientation = LinearLayout.VERTICAL
+        breakDetail.visibility = if (breakMaster.isChecked) View.VISIBLE else View.GONE
+
+        breakDetail.addView(reminderCheck("休息开始提醒", range.remindBreakStart) { checked ->
             updateRange(index) { it.copy(remindBreakStart = checked) }
-        }
-        card.addView(remindBreakStart)
-
-        val remindBreakEnd = CheckBox(this)
-        remindBreakEnd.text = "休息结束提醒"
-        remindBreakEnd.isChecked = range.remindBreakEnd
-        remindBreakEnd.setOnCheckedChangeListener { _, checked ->
+        })
+        breakDetail.addView(reminderCheck("休息结束提醒", range.remindBreakEnd) { checked ->
             updateRange(index) { it.copy(remindBreakEnd = checked) }
+        })
+
+        // 自定义休息时间
+        val customBreak = reminderCheck("自定义休息时间（默认用相邻时段间隙）", range.hasCustomBreak) { checked ->
+            updateRange(index) {
+                if (checked) it.copy(breakStartMinuteOfDay = 12 * 60, breakEndMinuteOfDay = 13 * 60 + 30)
+                else it.copy(breakStartMinuteOfDay = -1, breakEndMinuteOfDay = -1)
+            }
         }
-        card.addView(remindBreakEnd)
+        breakDetail.addView(customBreak)
+
+        if (range.hasCustomBreak) {
+            val breakRow = LinearLayout(this)
+            breakRow.orientation = LinearLayout.HORIZONTAL
+
+            val sLabel = Button(this)
+            sLabel.text = "休息开始 " + minuteLabel(range.breakStartMinuteOfDay)
+            sLabel.setOnClickListener {
+                TimePickerDialog(this, { _, h, m ->
+                    updateRange(index) { it.copy(breakStartMinuteOfDay = h * 60 + m) }
+                }, range.breakStartMinuteOfDay / 60, range.breakStartMinuteOfDay % 60, true).show()
+            }
+            breakRow.addView(sLabel)
+
+            val eLabel = Button(this)
+            eLabel.text = "休息结束 " + minuteLabel(range.breakEndMinuteOfDay)
+            eLabel.setOnClickListener {
+                TimePickerDialog(this, { _, h, m ->
+                    updateRange(index) { it.copy(breakEndMinuteOfDay = h * 60 + m) }
+                }, range.breakEndMinuteOfDay / 60, range.breakEndMinuteOfDay % 60, true).show()
+            }
+            breakRow.addView(eLabel)
+            breakDetail.addView(breakRow)
+        }
+
+        card.addView(breakDetail)
+
+        breakMaster.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindBreakStart = checked, remindBreakEnd = checked) }
+        }
 
         val divider = View(this)
-        divider.layoutParams = LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
-        )
+        divider.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(1))
         divider.setBackgroundColor(0x22000000)
         card.addView(divider)
 
         return card
     }
+
+    /** 生成一个带回调的复选框。 */
+    private fun reminderCheck(text: String, checked: Boolean, onChange: (Boolean) -> Unit): CheckBox {
+        val box = CheckBox(this)
+        box.text = text
+        box.isChecked = checked
+        box.setOnCheckedChangeListener { _, value -> onChange(value) }
+        return box
+    }
+
+    /** 分钟数（0 点起算）转 HH:mm。 */
+    private fun minuteLabel(minuteOfDay: Int): String =
+        String.format(Locale.US, "%02d:%02d", minuteOfDay / 60, minuteOfDay % 60)
 
     /** 更新指定下标的时段并重新渲染。 */
     private fun updateRange(index: Int, transform: (TimeRange) -> TimeRange) {
@@ -958,18 +1021,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     /** 试听某类提醒。 */
     private fun previewReminder(kind: ReminderKind) {
         try {
-            val preview = when (kind) {
+            val minutes = when (kind) {
                 ReminderKind.BEFORE_START, ReminderKind.BEFORE_END -> 5
                 else -> 0
             }
-            startForegroundService(
-                Intent(this, OffWorkService::class.java).apply {
-                    action = "SPEAK"
-                    putExtra("kind", kind.name)
-                    putExtra("minutes", preview)
-                }
-            )
-            statusView?.text = "正在试听：${kind.text(preview)}"
+            val intent = Intent(this, OffWorkService::class.java).apply {
+                action = "SPEAK"
+                // preview=true：服务端据此跳过「总开关必须开启」的检查
+                putExtra("preview", true)
+                putExtra("kind", kind.name)
+                putExtra("minutes", minutes)
+            }
+            // Android 8+ 用 startForegroundService；更低版本回退 startService
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent)
+            } else {
+                startService(intent)
+            }
+            statusView?.text = "正在试听：${kind.text(minutes)}"
         } catch (error: Throwable) {
             statusView?.text = "试听失败：${error.message}"
         }

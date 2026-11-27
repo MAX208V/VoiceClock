@@ -51,7 +51,7 @@ class OffWorkService : Service(), TextToSpeech.OnInitListener {
         super.onCreate()
         try {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
-                NotificationChannel(CHANNEL, "下班提醒", NotificationManager.IMPORTANCE_LOW)
+                NotificationChannel(CHANNEL, "上下班提醒", NotificationManager.IMPORTANCE_LOW)
             )
         } catch (_: Throwable) {
             // 渠道已存在时忽略
@@ -61,13 +61,18 @@ class OffWorkService : Service(), TextToSpeech.OnInitListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 关键：必须最先调用 startForeground。
+        // 之前把「总开关关闭」的判断放在它前面，试听时若开关没开就直接 stopSelf()，
+        // 系统会在 5 秒后抛 ForegroundServiceDidNotStartInTimeException 导致闪退。
+        startForeground(NOTIFICATION_ID, notification("上下班提醒"))
+
         val settings = OffWorkSettingsStorage.load(this)
-        if (!settings.enabled) {
+        // 试听不依赖总开关；只有正式到点提醒才检查开关
+        val preview = intent?.getBooleanExtra("preview", false) == true
+        if (!preview && !settings.enabled) {
             stopSelf()
             return START_NOT_STICKY
         }
-        // 前台服务必须先起通知，否则 Android 会抛 ANR 级异常
-        startForeground(NOTIFICATION_ID, notification("下班提醒"))
 
         val kindName = intent?.getStringExtra("kind")
         val kind = runCatching { ReminderKind.valueOf(kindName ?: "") }.getOrNull() ?: ReminderKind.ON_END
@@ -188,7 +193,7 @@ class OffWorkService : Service(), TextToSpeech.OnInitListener {
         )
         val builder = Notification.Builder(this, CHANNEL)
             .setContentTitle(title)
-            .setContentText(speechText ?: "正在播报下班提醒")
+            .setContentText(speechText ?: "正在播报提醒")
             .setSmallIcon(android.R.drawable.ic_lock_idle_alarm)
             .setContentIntent(pending)
             .setOngoing(true)

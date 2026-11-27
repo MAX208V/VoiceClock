@@ -18,6 +18,33 @@ data class OffWorkSettings(
     fun timeOn(day: ZonedDateTime) = day.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
     fun advanceTimeOn(day: ZonedDateTime): ZonedDateTime? =
         if (advanceMinutes <= 0) null else timeOn(day).minusMinutes(advanceMinutes.toLong())
+
+    /**
+     * 从 now 出发，找到不早于 now 且落在 weekdays 里的第一个「该时刻」。
+     *
+     * 例如 now=周五 19:00、下班 18:00、只选工作日 → 下周一 18:00。
+     * 纯函数，便于单元测试。
+     */
+    fun nextOccurrence(now: ZonedDateTime, target: ZonedDateTime): ZonedDateTime? {
+        var candidate = target
+        if (candidate.isBefore(now)) {
+            // 顺延到明天同一时刻，再按星期往后找
+            candidate = candidate.plusDays(1)
+        }
+        repeat(8) {
+            if (weekdays.contains(candidate.dayOfWeek.value) && !candidate.isBefore(now)) return candidate
+            candidate = candidate.plusDays(1)
+        }
+        return null
+    }
+
+    /** 下一次提前提醒时刻（未开启提前提醒时为 null）。 */
+    fun nextAdvance(now: ZonedDateTime): ZonedDateTime? =
+        advanceTimeOn(now)?.let { nextOccurrence(now, it) }
+
+    /** 下一次到点提醒时刻。 */
+    fun nextOnTime(now: ZonedDateTime): ZonedDateTime? =
+        nextOccurrence(now, timeOn(now))
 }
 
 object OffWorkSettingsStorage {

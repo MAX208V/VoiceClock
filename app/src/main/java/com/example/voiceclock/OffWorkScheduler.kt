@@ -26,41 +26,14 @@ object OffWorkScheduler {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    /** 计算下一个需要提醒的时刻（下班时刻本身，或提前提醒时刻）。 */
-    private fun nextOccurrence(
-        now: ZonedDateTime,
-        target: ZonedDateTime,
-        weekdays: Set<Int>
-    ): ZonedDateTime? {
-        var candidate = target
-        // 若目标时刻已过去，顺延到下一个生效星期
-        if (!candidate.isAfter(now)) {
-            candidate = candidate.plusDays(1)
-        }
-        var day = candidate
-        for (i in 0..6) {
-            if (weekdays.contains(day.dayOfWeek.value) && !day.isBefore(now)) {
-                return day
-            }
-            day = day.plusDays(1)
-        }
-        return null
-    }
-
     fun schedule(context: Context): Boolean {
         val settings = OffWorkSettingsStorage.load(context)
         if (!settings.enabled) { cancel(context); return true }
         val now = ZonedDateTime.now()
-        val target = settings.timeOn(now)
 
         val alarms = mutableListOf<Pair<Long, String>>()
-        val advance = settings.advanceTimeOn(now)
-        if (advance != null) {
-            val t = nextOccurrence(now, advance, settings.weekdays)
-            if (t != null) alarms.add(Pair(t.toInstant().toEpochMilli(), "advance"))
-        }
-        val t = nextOccurrence(now, target, settings.weekdays)
-        if (t != null) alarms.add(Pair(t.toInstant().toEpochMilli(), "on_time"))
+        settings.nextAdvance(now)?.let { alarms.add(Pair(it.toInstant().toEpochMilli(), "advance")) }
+        settings.nextOnTime(now)?.let { alarms.add(Pair(it.toInstant().toEpochMilli(), "on_time")) }
 
         // 每次重排先清空旧的，避免关闭提前提醒后残留上一次的闹钟
         cancel(context)
@@ -95,9 +68,6 @@ object OffWorkScheduler {
         val settings = OffWorkSettingsStorage.load(context)
         if (!settings.enabled) return null
         val now = ZonedDateTime.now()
-        val candidates = mutableListOf<ZonedDateTime>()
-        settings.advanceTimeOn(now)?.let { nextOccurrence(now, it, settings.weekdays)?.let(candidates::add) }
-        nextOccurrence(now, settings.timeOn(now), settings.weekdays)?.let(candidates::add)
-        return candidates.minOrNull()
+        return listOfNotNull(settings.nextAdvance(now), settings.nextOnTime(now)).minOrNull()
     }
 }

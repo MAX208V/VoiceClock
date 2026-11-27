@@ -1,115 +1,241 @@
 package com.example.voiceclock
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.ZonedDateTime
 
 /**
- * 下班提醒的纯逻辑测试：
- * - 时刻计算（下班时刻 / 提前提醒时刻）
+ * 上下班提醒的纯逻辑测试：
+ * - 多个时段的提醒推导
+ * - 相邻时段间隙自动生成「休息开始 / 休息结束」
+ * - 各类提醒的独立开关
  * - 星期过滤与跨天顺延
- * - 振动模式与星期解析
  */
 class OffWorkSettingsTest {
 
     private fun date(value: String) = ZonedDateTime.parse(value + "+08:00[Asia/Shanghai]")
 
-    @Test fun timeOnUsesConfiguredHourAndMinute() {
-        val settings = OffWorkSettings(hour = 18, minute = 30)
-        val t = settings.timeOn(date("2026-11-27T09:15:00"))
-        assertEquals(18, t.hour)
-        assertEquals(30, t.minute)
-        assertEquals(0, t.second)
-        assertEquals(27, t.dayOfMonth)
+    /** 两个时段：上午班 09:00–12:00、下午班 13:30–18:00。 */
+    private fun twoShifts() = OffWorkSettings(
+        enabled = true,
+        ranges = listOf(
+            TimeRange(9, 0, 12, 0, advanceStartMinutes = 10, advanceEndMinutes = 5),
+            TimeRange(13, 30, 18, 0, advanceStartMinutes = 10, advanceEndMinutes = 5)
+        ),
+        weekdays = setOf(1, 2, 3, 4, 5)
+    )
+
+    private fun kindsOn(settings: OffWorkSettings, now: ZonedDateTime, day: Int) =
+        settings.upcomingReminders(now, days = 0)
+            .filter { it.at.dayOfMonth == day }
+            .map { it.kind }
+
+    // ---------- 基础推导 ----------
+
+    @Test fun morningShiftProducesAllReminders() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 12, 0, advanceStartMinutes = 10, advanceEndMinutes = 5,
+                remindBeforeStart = true, remindOnStart = true)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val now = date("2026-11-27T07:00:00")
+        val kinds = settings.upcomingReminders(now, days = 0).map { it.kind }
+        assertTrue(kinds.contains(ReminderKind.BEFORE_START))
+        assertTrue(kinds.contains(ReminderKind.ON_START))
+        assertTrue(kinds.contains(ReminderKind.BEFORE_END))
+        assertTrue(kinds.contains(ReminderKind.ON_END))
     }
 
-    @Test fun advanceTimeIsBeforeQuittingTime() {
-        val settings = OffWorkSettings(hour = 18, minute = 0, advanceMinutes = 10)
-        val t = settings.advanceTimeOn(date("2026-11-27T09:15:00"))
-        assertEquals(17, t!!.hour)
-        assertEquals(50, t.minute)
+    @Test fun advanceReminderUsesConfiguredMinutes() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0, advanceStartMinutes = 20, remindBeforeStart = true)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val now = date("2026-11-27T07:00:00")
+        val before = settings.upcomingReminders(now, days = 0)
+            .first { it.kind == ReminderKind.BEFORE_START }
+        assertEquals(8, before.at.hour)
+        assertEquals(40, before.at.minute)
+        assertEquals(20, before.minutes)
     }
 
-    @Test fun advanceTimeIsNullWhenAdvanceDisabled() {
-        val settings = OffWorkSettings(advanceMinutes = 0)
-        assertNull(settings.advanceTimeOn(date("2026-11-27T09:15:00")))
+    // ---------- 休息：相邻时段间隙 ----------
+
+    @Test fun gapBetweenShiftsBecomesBreak() {
+        val settings = twoShifts()
+        val now = date("2026-11-27T07:00:00")
+        val reminders = settings.upcomingReminders(now, days = 0)
+
+        val breakStart = reminders.first { it.kind == ReminderKind.BREAK_START }
+        assertEquals(12, breakStart.at.hour)
+        assertEquals(0, breakStart.at.minute)
+
+        val breakEnd = reminders.first { it.kind == ReminderKind.BREAK_END }
+        assertEquals(13, breakEnd.at.hour)
+        assertEquals(30, breakEnd.at.minute)
     }
 
-    @Test fun advanceAcrossMidnight() {
-        // 下班 00:10，提前 30 分钟 → 前一天 23:40
-        val settings = OffWorkSettings(hour = 0, minute = 10, advanceMinutes = 30)
-        val t = settings.advanceTimeOn(date("2026-11-27T09:15:00"))
-        assertEquals(23, t!!.hour)
-        assertEquals(40, t.minute)
-        assertEquals(26, t.dayOfMonth)
+    @Test fun lastShiftEndsWithOnEndInsteadOfBreakStart() {
+        val settings = twoShifts()
+        val now = date("2026-11-27T07:00:00")
+        val at18 = settings.upcomingReminders(now, days = 0).filter { it.at.hour == 18 && it.at.minute == 0 }
+        assertEquals(1, at18.size)
+        assertEquals(ReminderKind.ON_END, at18.first().kind)
     }
 
-    @Test fun defaultWeekdaysAreWorkdays() {
-        val settings = OffWorkSettings()
-        assertEquals(setOf(1, 2, 3, 4, 5), settings.weekdays)
+    @Test fun singleShiftHasNoBreak() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val kinds = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0).map { it.kind }
+        assertFalse(kinds.contains(ReminderKind.BREAK_START))
+        assertFalse(kinds.contains(ReminderKind.BREAK_END))
     }
 
-    @Test fun vibrateDefaultsToOnWithShortMode() {
-        val settings = OffWorkSettings()
-        assertTrue(settings.vibrate)
-        assertEquals(VibrateMode.SHORT, settings.vibrateMode)
+    @Test fun breakRemindersCanBeDisabledIndependently() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(
+                TimeRange(9, 0, 12, 0, remindBreakStart = false, remindBreakEnd = false),
+                TimeRange(13, 30, 18, 0, remindBreakStart = false, remindBreakEnd = false)
+            ),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val kinds = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0).map { it.kind }
+        assertFalse(kinds.contains(ReminderKind.BREAK_START))
+        assertFalse(kinds.contains(ReminderKind.BREAK_END))
     }
 
-    @Test fun vibrateModeParsingFallsBackToShort() {
-        // 读取到异常字符串时必须回退，而不是抛异常导致界面崩溃
-        val parsed = runCatching { VibrateMode.valueOf("NOT_A_MODE") }.getOrDefault(VibrateMode.SHORT)
-        assertEquals(VibrateMode.SHORT, parsed)
-        assertEquals(VibrateMode.DOUBLE, VibrateMode.valueOf("DOUBLE"))
+    // ---------- 独立开关 ----------
+
+    @Test fun onStartReminderIsOffByDefault() {
+        val range = TimeRange()
+        assertFalse("上班到点默认不提醒", range.remindOnStart)
+        assertTrue("下班到点默认提醒", range.remindOnEnd)
+        assertTrue("休息开始默认提醒", range.remindBreakStart)
     }
 
-    // ---------- 下一次触发的星期顺延 ----------
-
-    /** 2026-11-27 是周五。 */
-    @Test fun fridayBeforeQuittingTimeFiresToday() {
-        val settings = OffWorkSettings(hour = 18, minute = 0, weekdays = setOf(1, 2, 3, 4, 5))
-        val next = settings.nextOnTime(date("2026-11-27T09:00:00"))
-        assertEquals(27, next!!.dayOfMonth)
-        assertEquals(18, next.hour)
-        assertEquals(java.time.DayOfWeek.FRIDAY, next.dayOfWeek)
+    @Test fun disablingAllRemindersYieldsNothing() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(
+                TimeRange(9, 0, 18, 0,
+                    remindBeforeStart = false, remindOnStart = false,
+                    remindBeforeEnd = false, remindOnEnd = false,
+                    remindBreakStart = false, remindBreakEnd = false)
+            ),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        assertTrue(settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 3).isEmpty())
     }
 
-    @Test fun fridayAfterQuittingTimeSkipsWeekend() {
-        // 周五 19:00 已过下班，只选工作日 → 下周一 18:00
-        val settings = OffWorkSettings(hour = 18, minute = 0, weekdays = setOf(1, 2, 3, 4, 5))
-        val next = settings.nextOnTime(date("2026-11-27T19:00:00"))
-        assertEquals(java.time.DayOfWeek.MONDAY, next!!.dayOfWeek)
-        assertEquals(30, next.dayOfMonth)
-        assertEquals(18, next.hour)
+    @Test fun disabledRangeIsIgnored() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(
+                TimeRange(9, 0, 12, 0, enabled = false),
+                TimeRange(13, 30, 18, 0)
+            ),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        val reminders = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 0)
+        assertTrue("停用的时段不应产生 12:00 提醒",
+            reminders.none { it.at.hour == 12 && it.at.minute == 0 })
     }
 
-    @Test fun weekendOnlyScheduleFromFriday() {
-        val settings = OffWorkSettings(hour = 18, minute = 0, weekdays = setOf(6, 7))
-        val next = settings.nextOnTime(date("2026-11-27T19:00:00"))
-        assertEquals(java.time.DayOfWeek.SATURDAY, next!!.dayOfWeek)
-        assertEquals(28, next.dayOfMonth)
+    @Test fun masterSwitchOffYieldsNothing() {
+        val settings = twoShifts().copy(enabled = false)
+        assertTrue(settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 3).isEmpty())
     }
 
-    @Test fun advanceReminderAlsoRespectsWeekdays() {
-        // 周五 17:55 时，提前 10 分钟指向 17:50 已过 → 顺延到下周一 17:50
-        val settings = OffWorkSettings(hour = 18, minute = 0, advanceMinutes = 10, weekdays = setOf(1, 2, 3, 4, 5))
-        val next = settings.nextAdvance(date("2026-11-27T17:55:00"))
-        assertEquals(java.time.DayOfWeek.MONDAY, next!!.dayOfWeek)
-        assertEquals(17, next.hour)
-        assertEquals(50, next.minute)
+    // ---------- 星期 ----------
+
+    @Test fun fridayEveningSkipsWeekend() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0)),
+            weekdays = setOf(1, 2, 3, 4, 5)
+        )
+        // 2026-11-27 是周五，19:00 已过 → 下一次落在 11-30 周一
+        val next = settings.nextReminder(date("2026-11-27T19:00:00"))
+        assertEquals(DayOfWeek.MONDAY, next!!.at.dayOfWeek)
+        assertEquals(30, next.at.dayOfMonth)
     }
 
-    @Test fun advanceBeforeItsTimeStaysToday() {
-        val settings = OffWorkSettings(hour = 18, minute = 0, advanceMinutes = 10, weekdays = setOf(1, 2, 3, 4, 5))
-        val next = settings.nextAdvance(date("2026-11-27T17:00:00"))
-        assertEquals(27, next!!.dayOfMonth)
-        assertEquals(17, next.hour)
-        assertEquals(50, next.minute)
+    @Test fun weekendOnlySchedule() {
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0)),
+            weekdays = setOf(6, 7)
+        )
+        val next = settings.nextReminder(date("2026-11-27T19:00:00"))
+        assertEquals(DayOfWeek.SATURDAY, next!!.at.dayOfWeek)
+        assertEquals(28, next.at.dayOfMonth)
     }
 
     @Test fun emptyWeekdaysNeverFires() {
-        val settings = OffWorkSettings(hour = 18, minute = 0, weekdays = emptySet())
-        assertNull(settings.nextOnTime(date("2026-11-27T09:00:00")))
+        val settings = OffWorkSettings(
+            enabled = true,
+            ranges = listOf(TimeRange(9, 0, 18, 0)),
+            weekdays = emptySet()
+        )
+        assertNull(settings.nextReminder(date("2026-11-27T09:00:00")))
+    }
+
+    @Test fun pastRemindersAreFilteredOut() {
+        val settings = twoShifts()
+        // 上午 10:30 之后，09:00/10:50 之类都该被过滤
+        val reminders = settings.upcomingReminders(date("2026-11-27T10:30:00"), days = 0)
+        assertTrue(reminders.all { !it.at.isBefore(date("2026-11-27T10:30:00")) })
+    }
+
+    // ---------- 其它 ----------
+
+    @Test fun remindersAreSortedAndUnique() {
+        val settings = twoShifts()
+        val reminders = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 2)
+        val times = reminders.map { it.at.toInstant() }
+        assertEquals("必须按时间升序", times.sorted(), times)
+        assertEquals("同一时刻同类型不应重复", reminders.size, reminders.distinctBy { it.key() }.size)
+    }
+
+    @Test fun crossesMidnightShift() {
+        // 22:00–06:00 夜班，结束时刻在次日
+        val range = TimeRange(22, 0, 6, 0)
+        assertTrue(range.crossesMidnight)
+        val settings = OffWorkSettings(enabled = true, ranges = listOf(range), weekdays = setOf(1, 2, 3, 4, 5))
+        val onEnd = settings.upcomingReminders(date("2026-11-27T07:00:00"), days = 1)
+            .first { it.kind == ReminderKind.ON_END }
+        assertEquals(6, onEnd.at.hour)
+        assertEquals(28, onEnd.at.dayOfMonth)
+    }
+
+    @Test fun labelFormatting() {
+        assertEquals("09:00–18:00", TimeRange(9, 0, 18, 0).label())
+        assertEquals("13:30–17:45", TimeRange(13, 30, 17, 45).label())
+    }
+
+    @Test fun reminderTexts() {
+        assertEquals("还有 10 分钟上班", ReminderKind.BEFORE_START.text(10))
+        assertEquals("上班时间到了", ReminderKind.ON_START.text(0))
+        assertEquals("还有 5 分钟下班", ReminderKind.BEFORE_END.text(5))
+        assertEquals("下班时间到了", ReminderKind.ON_END.text(0))
+        assertEquals("休息时间到了", ReminderKind.BREAK_START.text(0))
+        assertEquals("休息结束，继续上班", ReminderKind.BREAK_END.text(0))
+    }
+
+    @Test fun vibrateDefaults() {
+        val settings = OffWorkSettings()
+        assertTrue(settings.vibrate)
+        assertEquals(VibrateMode.SHORT, settings.vibrateMode)
+        assertEquals(setOf(1, 2, 3, 4, 5), settings.weekdays)
     }
 }

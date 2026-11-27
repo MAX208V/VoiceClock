@@ -9,55 +9,96 @@ import android.os.Build
 import java.time.ZonedDateTime
 
 object OffWorkScheduler {
+    /** 一次最多登记几个闹钟。太多会被系统限制，够覆盖接下来几次提醒即可。 */
+    private const val MAX_ALARMS = 4
+    private const val PREFS = "off_work_settings"
+    private const val KEY_SCHEDULED = "scheduled_keys"
+
     private fun manager(context: Context) = context.getSystemService(AlarmManager::class.java)
-    private fun permitted(context: Context) = Build.VERSION.SDK_INT < 31 || manager(context).canScheduleExactAlarms()
+    private fun permitted(context: Context) =
+        Build.VERSION.SDK_INT < 31 || manager(context).canScheduleExactAlarms()
 
     /**
+     * 生成 PendingIntent。
+     *
      * PendingIntent 的身份由 requestCode + Intent 比对（extras 不参与比对），
-     * 因此把 type 写进 data，确保「提前提醒」和「到点提醒」是两个不同实体，
-     * 否则后注册的会覆盖先注册的，导致只剩一次提醒。
+     * 所以把 kind 和触发时刻都写进 data，确保每个提醒都是独立实体，
+     * 否则后登记的会覆盖先登记的，多个时段就只剩一个提醒。
      */
-    private fun operation(context: Context, type: String) = PendingIntent.getBroadcast(
-        context,
-        if (type == "advance") 3 else 4,
-        Intent(context, OffWorkReceiver::class.java)
-            .setData(Uri.parse("voiceclock://offwork/" + type))
-            .putExtra("type", type),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-    )
+    private fun operation(context: Context, reminder: Reminder): PendingIntent {
+        val requestCode = reminder.key().hashCode() and 0x7fffffff
+        return PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            Intent(context, OffWorkReceiver::class.java)
+                .setData(Uri.parse("voiceclock://offwork/${reminder.kind}/${reminder.at.toInstant().toEpochMilli()}"))
+                .putExtra("kind", reminder.kind.name)
+                .putExtra("minutes", reminder.minutes),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
 
     fun schedule(context: Context): Boolean {
         val settings = OffWorkSettingsStorage.load(context)
-        if (!settings.enabled) { cancel(context); return true }
+        if (!settings.enabled) {
+            cancel(context)
+            return true
+        }
         val now = ZonedDateTime.now()
+        val upcoming = settings.upcomingReminders(now).take(MAX_ALARMS)
 
-        val alarms = mutableListOf<Pair<Long, String>>()
-        settings.nextAdvance(now)?.let { alarms.add(Pair(it.toInstant().toEpochMilli(), "advance")) }
-        settings.nextOnTime(now)?.let { alarms.add(Pair(it.toInstant().toEpochMilli(), "on_time")) }
-
-        // 每次重排先清空旧的，避免关闭提前提醒后残留上一次的闹钟
+        // 先清空旧的，避免关闭某个提醒后残留上一次的登记
         cancel(context)
         if (!permitted(context)) return false
-        if (alarms.isEmpty()) return false
-        // 提前提醒与到点提醒落在同一毫秒时只保留一次（例如 23:00 提前 60 分钟跨天重叠）
-        val distinct = alarms.distinctBy { it.first }
-        for (pair in distinct) {
+        if (upcoming.isEmpty()) return false
+
+        val scheduled = ArrayList<String>(upcoming.size)
+        for (reminder in upcoming) {
             try {
                 manager(context).setExactAndAllowWhileIdle(
-                    AlarmManager.RTC_WAKEUP, pair.first, operation(context, pair.second)
+                    AlarmManager.RTC_WAKEUP,
+                    reminder.at.toInstant().toEpochMilli(),
+                    operation(context, reminder)
                 )
+                scheduled.add("${reminder.kind}|${reminder.at.toInstant().toEpochMilli()}|${reminder.minutes}")
             } catch (_: SecurityException) {
                 cancel(context)
                 return false
             }
         }
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(KEY_SCHEDULED, scheduled.joinToString(";")).apply()
         return true
     }
 
+    /**
+     * 撤销上一次登记的所有闹钟。
+     *
+     * PendingIntent 必须用与登记时完全相同的 Intent 才能撤销，
+     * 所以把登记过的 key 持久化下来，撤销时逐个还原。
+     */
     fun cancel(context: Context) {
         try {
-            manager(context).cancel(operation(context, "advance"))
-            manager(context).cancel(operation(context, "on_time"))
+            val alarmManager = manager(context) ?: return
+            val saved = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                .getString(KEY_SCHEDULED, "") ?: ""
+            if (saved.isBlank()) return
+            for (token in saved.split(';')) {
+                val parts = token.split('|')
+                if (parts.size != 3) continue
+                val kindName = parts[0]
+                val millis = parts[1].toLongOrNull() ?: continue
+                val minutes = parts[2].toIntOrNull() ?: 0
+                val kind = runCatching { ReminderKind.valueOf(kindName) }.getOrNull() ?: continue
+                val reminder = Reminder(
+                    at = java.time.Instant.ofEpochMilli(millis).atZone(java.time.ZoneId.systemDefault()),
+                    kind = kind,
+                    minutes = minutes
+                )
+                alarmManager.cancel(operation(context, reminder))
+            }
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .remove(KEY_SCHEDULED).apply()
         } catch (_: Throwable) {
             // 取消失败不影响后续重排
         }
@@ -67,7 +108,6 @@ object OffWorkScheduler {
     fun next(context: Context): ZonedDateTime? {
         val settings = OffWorkSettingsStorage.load(context)
         if (!settings.enabled) return null
-        val now = ZonedDateTime.now()
-        return listOfNotNull(settings.nextAdvance(now), settings.nextOnTime(now)).minOrNull()
+        return settings.nextReminder(ZonedDateTime.now())?.at
     }
 }

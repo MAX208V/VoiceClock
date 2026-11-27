@@ -52,13 +52,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var slotContainer: LinearLayout? = null
     private var weatherSwitch: Switch? = null
     private var solarTermSwitch: Switch? = null
-    // 下班提醒
+    // 上下班提醒
     private var offWorkEnabledSwitch: Switch? = null
-    private var offWorkTimeButton: Button? = null
-    private var offWorkAdvanceSpinner: Spinner? = null
     private var offWorkOnlyHeadsetSwitch: Switch? = null
     private var offWorkVibrateSwitch: Switch? = null
     private var offWorkVibrateModeSpinner: Spinner? = null
+    private var offWorkRangeContainer: LinearLayout? = null
     private val offWorkDayChecks = ArrayList<CheckBox>()
     // 时间总开关 + 细粒度
     private var timeSwitch: Switch? = null
@@ -216,81 +215,59 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         solarTermSwitch = makeSwitch(root, "播报二十四节气", extras.solarTermEnabled)
 
         // ---------- 下班提醒 ----------
-        addLabel(root, "下班提醒（独立于定时报时）", 20f)
-        val off = OffWorkSettingsStorage.load(this)
-        offWorkEnabledSwitch = makeSwitch(root, "启用下班提醒", off.enabled)
-        offWorkTimeButton = Button(this)
-        offWorkTimeButton?.text = "下班时刻：${String.format(Locale.US, "%02d:%02d", off.hour, off.minute)}（点击修改）"
-        offWorkTimeButton?.setOnClickListener {
-            TimePickerDialog(this, { _, h, m ->
-                val cur = OffWorkSettingsStorage.load(this)
-                OffWorkSettingsStorage.save(this, cur.copy(hour = h, minute = m))
-                offWorkTimeButton?.text = "下班时刻：${String.format(Locale.US, "%02d:%02d", h, m)}（点击修改）"
-                onSettingChanged()
-            }, off.hour, off.minute, true).show()
-        }
-        root.addView(offWorkTimeButton)
+        addLabel(root, "上下班提醒（独立于定时报时）", 20f)
+        addLabel(root, "可设置多个时段；相邻时段之间的空档会自动当作休息时间。", 13f)
 
-        addLabel(root, "提前提醒", 15f)
-        offWorkAdvanceSpinner = Spinner(this)
-        val advanceLabels = listOf("不提前", "提前 5 分钟", "提前 10 分钟", "提前 15 分钟", "提前 30 分钟")
-        val advanceValues = listOf(0, 5, 10, 15, 30)
-        // 设成列表里没有的值时按「自定义」显示，避免错位成第一项「不提前」
-        offWorkAdvanceSpinner?.adapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            if (advanceValues.contains(off.advanceMinutes)) advanceLabels
-            else advanceLabels + "提前 ${off.advanceMinutes} 分钟"
-        )
-        offWorkAdvanceSpinner?.setSelection(
-            advanceValues.indexOf(off.advanceMinutes).let { if (it >= 0) it else advanceLabels.size }
-        )
-        offWorkAdvanceSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                val chosen = advanceValues.getOrNull(position) ?: return
-                val cur = OffWorkSettingsStorage.load(this@MainActivity)
-                OffWorkSettingsStorage.save(this@MainActivity, cur.copy(advanceMinutes = chosen))
-                onSettingChanged()
-            }
-            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
-        }
-        root.addView(offWorkAdvanceSpinner)
+        offWorkEnabledSwitch = makeSwitch(root, "启用上下班提醒", OffWorkSettingsStorage.load(this).enabled)
 
-        addLabel(root, "生效星期", 15f)
+        // 时段列表的容器，增删时段后整体重建
+        offWorkRangeContainer = LinearLayout(this)
+        offWorkRangeContainer?.orientation = LinearLayout.VERTICAL
+        root.addView(offWorkRangeContainer)
+
+        addButton(root, "＋ 添加时段") { addOffWorkRange() }
+
+        addLabel(root, "生效星期（所有时段共用）", 15f)
         val offWorkDayNames = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-        val dayContainer = LinearLayout(this)
-        dayContainer.orientation = LinearLayout.HORIZONTAL
+        val offWorkWeekContainer = LinearLayout(this)
+        offWorkWeekContainer.orientation = LinearLayout.HORIZONTAL
         for (i in 1..7) {
             val cb = CheckBox(this)
             cb.text = offWorkDayNames[i - 1]
-            cb.isChecked = off.weekdays.contains(i)
+            cb.isChecked = OffWorkSettingsStorage.load(this).weekdays.contains(i)
             cb.setOnCheckedChangeListener { view, checked ->
                 val cur = OffWorkSettingsStorage.load(this@MainActivity)
                 val newSet = if (checked) cur.weekdays + i else cur.weekdays - i
                 if (newSet.isEmpty()) {
-                    // 一天都不选等于永远不提醒，直接撤销这次点击
                     (view as CheckBox).isChecked = true
-                    statusView?.text = "至少要选一天，否则下班提醒不会触发"
+                    statusView?.text = "至少要选一天，否则提醒不会触发"
                     return@setOnCheckedChangeListener
                 }
                 OffWorkSettingsStorage.save(this@MainActivity, cur.copy(weekdays = newSet))
                 onSettingChanged()
             }
             offWorkDayChecks.add(cb)
-            dayContainer.addView(cb)
+            offWorkWeekContainer.addView(cb)
         }
-        root.addView(dayContainer)
+        root.addView(offWorkWeekContainer)
 
         addLabel(root, "默认振动；关闭「播报时振动」后只播报不振动。", 13f)
-        offWorkOnlyHeadsetSwitch = makeSwitch(root, "只在耳机/蓝牙连接时播报", off.onlyHeadset)
-        offWorkVibrateSwitch = makeSwitch(root, "播报时振动", off.vibrate)
+        offWorkOnlyHeadsetSwitch = makeSwitch(
+            root, "只在耳机/蓝牙连接时播报", OffWorkSettingsStorage.load(this).onlyHeadset
+        )
+        offWorkVibrateSwitch = makeSwitch(
+            root, "播报时振动", OffWorkSettingsStorage.load(this).vibrate
+        )
         addLabel(root, "振动模式", 15f)
         offWorkVibrateModeSpinner = Spinner(this)
         val vibrateLabels = listOf("短振", "长振", "两次短振")
         val vibrateValues = VibrateMode.values()
-        val vibrateAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, vibrateLabels)
-        offWorkVibrateModeSpinner?.adapter = vibrateAdapter
-        offWorkVibrateModeSpinner?.setSelection(vibrateValues.indexOf(off.vibrateMode).coerceAtLeast(0))
+        offWorkVibrateModeSpinner?.adapter = ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item, vibrateLabels
+        )
+        offWorkVibrateModeSpinner?.setSelection(
+            vibrateValues.indexOf(OffWorkSettingsStorage.load(this).vibrateMode).coerceAtLeast(0)
+        )
         offWorkVibrateModeSpinner?.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 val cur = OffWorkSettingsStorage.load(this@MainActivity)
@@ -301,32 +278,14 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         }
         root.addView(offWorkVibrateModeSpinner)
 
-        addButton(root, "试听下班提醒（提前）") {
-            try {
-                startForegroundService(
-                    Intent(this, OffWorkService::class.java).apply {
-                        action = "SPEAK"
-                        putExtra("type", "advance")
-                    }
-                )
-                statusView?.text = "正在试听下班提醒（提前）"
-            } catch (error: Throwable) {
-                statusView?.text = "试听失败：${error.message}"
-            }
-        }
-        addButton(root, "试听下班提醒（到点）") {
-            try {
-                startForegroundService(
-                    Intent(this, OffWorkService::class.java).apply {
-                        action = "SPEAK"
-                        putExtra("type", "on_time")
-                    }
-                )
-                statusView?.text = "正在试听下班提醒（到点）"
-            } catch (error: Throwable) {
-                statusView?.text = "试听失败：${error.message}"
-            }
-        }
+        addLabel(root, "试听", 15f)
+        addButton(root, "试听上班到点") { previewReminder(ReminderKind.ON_START) }
+        addButton(root, "试听下班到点") { previewReminder(ReminderKind.ON_END) }
+        addButton(root, "试听休息开始") { previewReminder(ReminderKind.BREAK_START) }
+        addButton(root, "试听休息结束") { previewReminder(ReminderKind.BREAK_END) }
+
+        // 首次渲染时段列表
+        rebuildOffWorkRanges()
 
         // ---------- 音频 ----------
         addLabel(root, "音频", 20f)
@@ -738,6 +697,8 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                     placeName = cityInput?.text?.toString()?.trim() ?: current.placeName
                 )
             )
+            // 时段、星期、振动模式在各自控件回调里已落盘，
+            // 这里只同步总开关与两个布尔开关，避免用旧值覆盖新选择
             val off = OffWorkSettingsStorage.load(this)
             val updated = off.copy(
                 enabled = offWorkEnabledSwitch?.isChecked ?: off.enabled,
@@ -834,6 +795,183 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         )) {
             view?.isEnabled = enabled
             view?.alpha = if (enabled) 1f else 0.45f
+        }
+    }
+
+    // ---------- 上下班提醒：时段列表 ----------
+
+    /** 时间段有变化后重新渲染整个列表（表单逻辑简单，重建比局部更新更可靠）。 */
+    private fun rebuildOffWorkRanges() {
+        val container = offWorkRangeContainer ?: return
+        container.removeAllViews()
+        val settings = OffWorkSettingsStorage.load(this)
+        if (settings.ranges.isEmpty()) {
+            val hint = TextView(this)
+            hint.text = "还没有时段，点下方「＋ 添加时段」"
+            hint.textSize = 13f
+            container.addView(hint)
+            return
+        }
+        settings.ranges.forEachIndexed { index, range ->
+            container.addView(buildRangeRow(index, range))
+        }
+    }
+
+    /** 单个时段的编辑卡片。 */
+    private fun buildRangeRow(index: Int, range: TimeRange): View {
+        val card = LinearLayout(this)
+        card.orientation = LinearLayout.VERTICAL
+        card.setPadding(dp(8), dp(8), dp(8), dp(8))
+
+        val titleRow = LinearLayout(this)
+        titleRow.orientation = LinearLayout.HORIZONTAL
+        titleRow.gravity = android.view.Gravity.CENTER_VERTICAL
+
+        val enable = CheckBox(this)
+        enable.text = "第 ${index + 1} 段 ${range.label()}"
+        enable.isChecked = range.enabled
+        enable.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        enable.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(enabled = checked) }
+        }
+        titleRow.addView(enable)
+
+        val delete = Button(this)
+        delete.text = "删除"
+        delete.setOnClickListener { deleteOffWorkRange(index) }
+        titleRow.addView(delete)
+        card.addView(titleRow)
+
+        // 上班时刻
+        val startButton = Button(this)
+        startButton.text = "上班 ${String.format(Locale.US, "%02d:%02d", range.startHour, range.startMinute)}"
+        startButton.setOnClickListener {
+            TimePickerDialog(this, { _, h, m ->
+                updateRange(index) { it.copy(startHour = h, startMinute = m) }
+            }, range.startHour, range.startMinute, true).show()
+        }
+        card.addView(startButton)
+
+        // 下班时刻
+        val endButton = Button(this)
+        endButton.text = "下班 ${String.format(Locale.US, "%02d:%02d", range.endHour, range.endMinute)}"
+        endButton.setOnClickListener {
+            TimePickerDialog(this, { _, h, m ->
+                updateRange(index) { it.copy(endHour = h, endMinute = m) }
+            }, range.endHour, range.endMinute, true).show()
+        }
+        card.addView(endButton)
+
+        // 提醒开关
+        val remindBeforeStart = CheckBox(this)
+        remindBeforeStart.text = "上班前提醒（提前 ${range.advanceStartMinutes} 分钟）"
+        remindBeforeStart.isChecked = range.remindBeforeStart
+        remindBeforeStart.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindBeforeStart = checked) }
+        }
+        card.addView(remindBeforeStart)
+
+        val remindOnStart = CheckBox(this)
+        remindOnStart.text = "上班到点提醒"
+        remindOnStart.isChecked = range.remindOnStart
+        remindOnStart.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindOnStart = checked) }
+        }
+        card.addView(remindOnStart)
+
+        val remindBeforeEnd = CheckBox(this)
+        remindBeforeEnd.text = "下班前提醒（提前 ${range.advanceEndMinutes} 分钟）"
+        remindBeforeEnd.isChecked = range.remindBeforeEnd
+        remindBeforeEnd.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindBeforeEnd = checked) }
+        }
+        card.addView(remindBeforeEnd)
+
+        val remindOnEnd = CheckBox(this)
+        remindOnEnd.text = "下班到点提醒"
+        remindOnEnd.isChecked = range.remindOnEnd
+        remindOnEnd.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindOnEnd = checked) }
+        }
+        card.addView(remindOnEnd)
+
+        val remindBreakStart = CheckBox(this)
+        remindBreakStart.text = "休息开始提醒"
+        remindBreakStart.isChecked = range.remindBreakStart
+        remindBreakStart.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindBreakStart = checked) }
+        }
+        card.addView(remindBreakStart)
+
+        val remindBreakEnd = CheckBox(this)
+        remindBreakEnd.text = "休息结束提醒"
+        remindBreakEnd.isChecked = range.remindBreakEnd
+        remindBreakEnd.setOnCheckedChangeListener { _, checked ->
+            updateRange(index) { it.copy(remindBreakEnd = checked) }
+        }
+        card.addView(remindBreakEnd)
+
+        val divider = View(this)
+        divider.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(1)
+        )
+        divider.setBackgroundColor(0x22000000)
+        card.addView(divider)
+
+        return card
+    }
+
+    /** 更新指定下标的时段并重新渲染。 */
+    private fun updateRange(index: Int, transform: (TimeRange) -> TimeRange) {
+        val current = OffWorkSettingsStorage.load(this)
+        val ranges = current.ranges.toMutableList()
+        val existing = ranges.getOrNull(index) ?: return
+        ranges[index] = transform(existing)
+        OffWorkSettingsStorage.save(this, current.copy(ranges = ranges))
+        rebuildOffWorkRanges()
+        onSettingChanged()
+    }
+
+    private fun addOffWorkRange() {
+        val current = OffWorkSettingsStorage.load(this)
+        OffWorkSettingsStorage.save(
+            this, current.copy(ranges = current.ranges + TimeRange(startHour = 13, startMinute = 0,
+                endHour = 18, endMinute = 0))
+        )
+        rebuildOffWorkRanges()
+        onSettingChanged()
+    }
+
+    private fun deleteOffWorkRange(index: Int) {
+        val current = OffWorkSettingsStorage.load(this)
+        if (current.ranges.size <= 1) {
+            statusView?.text = "至少保留一个时段"
+            return
+        }
+        val ranges = current.ranges.toMutableList()
+        ranges.removeAt(index)
+        OffWorkSettingsStorage.save(this, current.copy(ranges = ranges))
+        rebuildOffWorkRanges()
+        onSettingChanged()
+    }
+
+    /** 试听某类提醒。 */
+    private fun previewReminder(kind: ReminderKind) {
+        try {
+            val preview = when (kind) {
+                ReminderKind.BEFORE_START, ReminderKind.BEFORE_END -> 5
+                else -> 0
+            }
+            startForegroundService(
+                Intent(this, OffWorkService::class.java).apply {
+                    action = "SPEAK"
+                    putExtra("kind", kind.name)
+                    putExtra("minutes", preview)
+                }
+            )
+            statusView?.text = "正在试听：${kind.text(preview)}"
+        } catch (error: Throwable) {
+            statusView?.text = "试听失败：${error.message}"
         }
     }
 

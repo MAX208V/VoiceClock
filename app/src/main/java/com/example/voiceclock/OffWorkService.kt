@@ -69,12 +69,11 @@ class OffWorkService : Service(), TextToSpeech.OnInitListener {
         // 前台服务必须先起通知，否则 Android 会抛 ANR 级异常
         startForeground(NOTIFICATION_ID, notification("下班提醒"))
 
-        val type = intent?.getStringExtra("type") ?: "on_time"
-        speechText = when (type) {
-            "advance" -> "还有 ${settings.advanceMinutes} 分钟下班"
-            else -> "下班时间到了"
-        }
-        Log.i(TAG, "触发下班提醒 type=$type")
+        val kindName = intent?.getStringExtra("kind")
+        val kind = runCatching { ReminderKind.valueOf(kindName ?: "") }.getOrNull() ?: ReminderKind.ON_END
+        val minutes = intent?.getIntExtra("minutes", 0) ?: 0
+        speechText = kind.text(minutes)
+        Log.i(TAG, "触发提醒 kind=$kind text=$speechText")
 
         // 只耳机模式：没有耳机/蓝牙输出就静默跳过（不播报也不振动）
         if (settings.onlyHeadset && !isHeadsetConnected()) {

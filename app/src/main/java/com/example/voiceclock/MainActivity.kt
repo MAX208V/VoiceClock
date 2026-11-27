@@ -58,6 +58,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
     private var offWorkVibrateSwitch: Switch? = null
     private var offWorkVibrateModeSpinner: Spinner? = null
     private var offWorkRangeContainer: LinearLayout? = null
+    private var offWorkDetailContainer: LinearLayout? = null
     private val offWorkDayChecks = ArrayList<CheckBox>()
     // 时间总开关 + 细粒度
     private var timeSwitch: Switch? = null
@@ -145,15 +146,65 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val saved = Settings.load(this)
         val extras = Settings.extras(this)
 
-        val root = LinearLayout(this)
-        root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(20), dp(16), dp(20), dp(24))
+        // ---------- 顶部标签页 ----------
+        // 「语音报时」与「上下班提醒」分屏显示，各自一个 ScrollView，
+        // 避免两类设置混在同一个长列表里难以查找。
+        val outer = LinearLayout(this)
+        outer.orientation = LinearLayout.VERTICAL
 
-        val scroll = ScrollView(this)
-        scroll.addView(root)
-        scroll.isFillViewport = true
+        val tabRow = LinearLayout(this)
+        tabRow.orientation = LinearLayout.HORIZONTAL
+        tabRow.setPadding(dp(12), dp(10), dp(12), dp(4))
 
-        addLabel(root, "语音报时播报器", 28f)
+        val clockTabButton = Button(this)
+        clockTabButton.text = "语音报时"
+        clockTabButton.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        tabRow.addView(clockTabButton)
+
+        val offWorkTabButton = Button(this)
+        offWorkTabButton.text = "上下班提醒"
+        offWorkTabButton.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        tabRow.addView(offWorkTabButton)
+        outer.addView(tabRow)
+
+        val clockRoot = LinearLayout(this)
+        clockRoot.orientation = LinearLayout.VERTICAL
+        clockRoot.setPadding(dp(20), dp(8), dp(20), dp(24))
+        val clockScroll = ScrollView(this)
+        clockScroll.isFillViewport = true
+        clockScroll.addView(clockRoot)
+
+        val offWorkRoot = LinearLayout(this)
+        offWorkRoot.orientation = LinearLayout.VERTICAL
+        offWorkRoot.setPadding(dp(20), dp(8), dp(20), dp(24))
+        val offWorkScroll = ScrollView(this)
+        offWorkScroll.isFillViewport = true
+        offWorkScroll.visibility = View.GONE
+        offWorkScroll.addView(offWorkRoot)
+
+        outer.addView(clockScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        outer.addView(offWorkScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        clockTabButton.setOnClickListener {
+            clockScroll.visibility = View.VISIBLE
+            offWorkScroll.visibility = View.GONE
+            clockTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
+            offWorkTabButton.setBackgroundColor(0)
+        }
+        offWorkTabButton.setOnClickListener {
+            clockScroll.visibility = View.GONE
+            offWorkScroll.visibility = View.VISIBLE
+            offWorkTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
+            clockTabButton.setBackgroundColor(0)
+        }
+
+        // 报时页继续使用变量名 root/scroll，减少下方大段代码改动
+        val root = clockRoot
+        val scroll = clockScroll
+        // 上下班页
+        val offRoot = offWorkRoot
+
+        addLabel(root, "语音报时播报器", 26f)
         addLabel(root, "定时播报：时间 + 天气（自动定位）+ 节气。所有设置改动自动保存。", 14f)
 
         // ---------- 播报内容 ----------
@@ -215,19 +266,30 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         solarTermSwitch = makeSwitch(root, "播报二十四节气", extras.solarTermEnabled)
 
         // ---------- 下班提醒 ----------
-        addLabel(root, "上下班提醒（独立于定时报时）", 20f)
-        addLabel(root, "可设置多个时段；相邻时段之间的空档会自动当作休息时间。", 13f)
+        addLabel(offRoot, "上下班提醒", 26f)
+        addLabel(offRoot, "独立于定时报时。可设置多个时段，相邻时段之间的空档自动当作休息时间。", 13f)
 
-        offWorkEnabledSwitch = makeSwitch(root, "启用上下班提醒", OffWorkSettingsStorage.load(this).enabled)
+        offWorkEnabledSwitch = makeSwitch(offRoot, "启用上下班提醒", OffWorkSettingsStorage.load(this).enabled)
+        offWorkEnabledSwitch?.setOnCheckedChangeListener { _, checked ->
+            offWorkDetailContainer?.visibility = if (checked) View.VISIBLE else View.GONE
+            onSettingChanged()
+        }
+
+        // 所有子设置放进一个容器，随总开关整体隐藏/展开
+        val offWorkDetail = LinearLayout(this)
+        offWorkDetail.orientation = LinearLayout.VERTICAL
+        offWorkDetail.visibility = if (offWorkEnabledSwitch?.isChecked == true) View.VISIBLE else View.GONE
+        offWorkDetailContainer = offWorkDetail
+        offRoot.addView(offWorkDetail)
 
         // 时段列表的容器，增删时段后整体重建
         offWorkRangeContainer = LinearLayout(this)
         offWorkRangeContainer?.orientation = LinearLayout.VERTICAL
-        root.addView(offWorkRangeContainer)
+        offWorkDetail.addView(offWorkRangeContainer)
 
-        addButton(root, "＋ 添加时段") { addOffWorkRange() }
+        addButton(offWorkDetail, "＋ 添加时段") { addOffWorkRange() }
 
-        addLabel(root, "生效星期（所有时段共用）", 15f)
+        addLabel(offWorkDetail, "生效星期（所有时段共用）", 15f)
         val offWorkDayNames = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
         val offWorkWeekContainer = LinearLayout(this)
         offWorkWeekContainer.orientation = LinearLayout.HORIZONTAL
@@ -249,16 +311,16 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             offWorkDayChecks.add(cb)
             offWorkWeekContainer.addView(cb)
         }
-        root.addView(offWorkWeekContainer)
+        offWorkDetail.addView(offWorkWeekContainer)
 
-        addLabel(root, "默认振动；关闭「播报时振动」后只播报不振动。", 13f)
+        addLabel(offWorkDetail, "默认振动；关闭「播报时振动」后只播报不振动。", 13f)
         offWorkOnlyHeadsetSwitch = makeSwitch(
             root, "只在耳机/蓝牙连接时播报", OffWorkSettingsStorage.load(this).onlyHeadset
         )
         offWorkVibrateSwitch = makeSwitch(
             root, "播报时振动", OffWorkSettingsStorage.load(this).vibrate
         )
-        addLabel(root, "振动模式", 15f)
+        addLabel(offWorkDetail, "振动模式", 15f)
         offWorkVibrateModeSpinner = Spinner(this)
         val vibrateLabels = listOf("短振", "长振", "两次短振")
         val vibrateValues = VibrateMode.values()
@@ -276,13 +338,13 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) = Unit
         }
-        root.addView(offWorkVibrateModeSpinner)
+        offWorkDetail.addView(offWorkVibrateModeSpinner)
 
-        addLabel(root, "试听", 15f)
-        addButton(root, "试听上班到点") { previewReminder(ReminderKind.ON_START) }
-        addButton(root, "试听下班到点") { previewReminder(ReminderKind.ON_END) }
-        addButton(root, "试听休息开始") { previewReminder(ReminderKind.BREAK_START) }
-        addButton(root, "试听休息结束") { previewReminder(ReminderKind.BREAK_END) }
+        addLabel(offWorkDetail, "试听", 15f)
+        addButton(offWorkDetail, "试听上班到点") { previewReminder(ReminderKind.ON_START) }
+        addButton(offWorkDetail, "试听下班到点") { previewReminder(ReminderKind.ON_END) }
+        addButton(offWorkDetail, "试听休息开始") { previewReminder(ReminderKind.BREAK_START) }
+        addButton(offWorkDetail, "试听休息结束") { previewReminder(ReminderKind.BREAK_END) }
 
         // 首次渲染时段列表
         rebuildOffWorkRanges()
@@ -473,7 +535,9 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         statusView?.setPadding(0, dp(16), 0, dp(16))
         root.addView(statusView)
 
-        setContentView(scroll)
+        // 内容建好后设置默认高亮，避免按钮被后续样式覆盖
+        clockTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
+        setContentView(outer)
 
         updateToggleButton()
         showStatus(if (Settings.enabled(this)) "报时已开启" else "当前未开启")
@@ -876,7 +940,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         startDetail.addView(reminderCheck("上班到点提醒", range.remindOnStart) { checked ->
             updateRange(index) { it.copy(remindOnStart = checked) }
         })
-        // 时刻按钮放在详情最前，收起时也同样可见，保证随时能改时间
+        // 时刻按钮随「上班提醒」总开关一起收起/展开
         startDetail.addView(startButton, 0)
         card.addView(startDetail)
 
@@ -1561,5 +1625,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     companion object {
         private const val REQUEST_PICK_CHIME = 21
+        /** 选中标签的高亮底色（半透明蓝，深浅色模式下都可见）。 */
+        private const val TAB_ACTIVE_COLOR = 0x330078D7
     }
 }

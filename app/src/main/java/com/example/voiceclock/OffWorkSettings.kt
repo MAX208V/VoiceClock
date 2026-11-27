@@ -17,7 +17,7 @@ data class OffWorkSettings(
 ) {
     fun timeOn(day: ZonedDateTime) = day.withHour(hour).withMinute(minute).withSecond(0).withNano(0)
     fun advanceTimeOn(day: ZonedDateTime): ZonedDateTime? =
-        if (advanceMinutes <= 0) null else timeOn(day).minusMinutes(advanceMinutes)
+        if (advanceMinutes <= 0) null else timeOn(day).minusMinutes(advanceMinutes.toLong())
 }
 
 object OffWorkSettingsStorage {

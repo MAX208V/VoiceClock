@@ -257,12 +257,12 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         root.addView(offWorkAdvanceSpinner)
 
         addLabel(root, "生效星期", 15f)
-        val dayNames = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+        val offWorkDayNames = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
         val dayContainer = LinearLayout(this)
         dayContainer.orientation = LinearLayout.HORIZONTAL
         for (i in 1..7) {
             val cb = CheckBox(this)
-            cb.text = dayNames[i - 1]
+            cb.text = offWorkDayNames[i - 1]
             cb.isChecked = off.weekdays.contains(i)
             cb.setOnCheckedChangeListener { view, checked ->
                 val cur = OffWorkSettingsStorage.load(this@MainActivity)

@@ -203,12 +203,9 @@ class OffWorkService : Service(), TextToSpeech.OnInitListener {
 
     override fun onDestroy() {
         stopped = true
-        // 本次提醒已处理完毕，重新排下一次（明天/下个工作日）
-        try {
-            OffWorkScheduler.schedule(this)
-        } catch (error: Throwable) {
-            Log.w(TAG, "重排下次下班提醒失败", error)
-        }
+        // 注意：这里不重排下一次。重排由 OffWorkReceiver 在拉起服务之前完成，
+        // 因为服务可能因「仅耳机模式跳过」或系统回收而提前结束，
+        // 放在这里会造成「跳过→重排→再次触发」的反复循环。
         handler.removeCallbacksAndMessages(null)
         try {
             tts?.stop()

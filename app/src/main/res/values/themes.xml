@@ -7,6 +7,10 @@
     -->
     <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/surface</item>
+        <!-- 状态栏图标用深色，配合浅色背景 -->
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="waveColor">@color/wave_wave</item>
         <item name="waveProgressColor">@color/wave_progress</item>
         <item name="waveBackColor">@color/wave_back</item>

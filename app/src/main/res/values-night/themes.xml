@@ -3,6 +3,10 @@
     <!-- 深色主题：系统处于深色模式时自动使用 -->
     <style name="AppTheme" parent="@android:style/Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/surface</item>
+        <!-- 深色背景需要浅色状态栏图标 -->
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="waveColor">@color/wave_wave</item>
         <item name="waveProgressColor">@color/wave_progress</item>
         <item name="waveBackColor">@color/wave_back</item>

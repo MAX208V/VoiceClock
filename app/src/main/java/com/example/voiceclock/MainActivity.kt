@@ -152,20 +152,28 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         val outer = LinearLayout(this)
         outer.orientation = LinearLayout.VERTICAL
 
+        // 顶部标签栏：用 TextView + 下划线指示器，贴合 Material 风格，
+        // 避免按钮自带边框和按压涟漪破坏统一感。
         val tabRow = LinearLayout(this)
         tabRow.orientation = LinearLayout.HORIZONTAL
-        tabRow.setPadding(dp(12), dp(10), dp(12), dp(4))
+        tabRow.setPadding(dp(8), dp(6), dp(8), 0)
 
-        val clockTabButton = Button(this)
-        clockTabButton.text = "语音报时"
-        clockTabButton.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        tabRow.addView(clockTabButton)
+        val clockTab = buildTab("语音报时")
+        tabRow.addView(clockTab.root)
+        val offWorkTab = buildTab("上下班提醒")
+        tabRow.addView(offWorkTab.root)
 
-        val offWorkTabButton = Button(this)
-        offWorkTabButton.text = "上下班提醒"
-        offWorkTabButton.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        tabRow.addView(offWorkTabButton)
-        outer.addView(tabRow)
+        // 标签栏下方一条细分隔线，与分隔线颜色一致
+        val tabBar = LinearLayout(this)
+        tabBar.orientation = LinearLayout.VERTICAL
+        tabBar.addView(tabRow)
+        val tabDivider = View(this)
+        tabDivider.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, maxOf(1, dp(1))
+        )
+        tabDivider.setBackgroundColor(themeDividerColor())
+        tabBar.addView(tabDivider)
+        outer.addView(tabBar)
 
         val clockRoot = LinearLayout(this)
         clockRoot.orientation = LinearLayout.VERTICAL
@@ -185,18 +193,22 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         outer.addView(clockScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         outer.addView(offWorkScroll, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
 
-        clockTabButton.setOnClickListener {
+        fun selectClock() {
             clockScroll.visibility = View.VISIBLE
             offWorkScroll.visibility = View.GONE
-            clockTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
-            offWorkTabButton.setBackgroundColor(0)
+            setTabSelected(clockTab, true)
+            setTabSelected(offWorkTab, false)
         }
-        offWorkTabButton.setOnClickListener {
+
+        fun selectOffWork() {
             clockScroll.visibility = View.GONE
             offWorkScroll.visibility = View.VISIBLE
-            offWorkTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
-            clockTabButton.setBackgroundColor(0)
+            setTabSelected(clockTab, false)
+            setTabSelected(offWorkTab, true)
         }
+
+        clockTab.root.setOnClickListener { selectClock() }
+        offWorkTab.root.setOnClickListener { selectOffWork() }
 
         // 报时页继续使用变量名 root/scroll，减少下方大段代码改动
         val root = clockRoot
@@ -535,8 +547,15 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         statusView?.setPadding(0, dp(16), 0, dp(16))
         root.addView(statusView)
 
-        // 内容建好后设置默认高亮，避免按钮被后续样式覆盖
-        clockTabButton.setBackgroundColor(TAB_ACTIVE_COLOR)
+        // 内容构建完成后选中第一个标签
+        selectClock()
+
+        // Android 15（targetSdk 35）默认强制 edge-to-edge，
+        // 必须自己把状态栏与导航栏的高度让出来，否则顶栏会被状态栏压住。
+        outer.setOnApplyWindowInsetsListener { view, insets ->
+            view.setPadding(0, insets.systemWindowInsetTop, 0, insets.systemWindowInsetBottom)
+            insets
+        }
         setContentView(outer)
 
         updateToggleButton()
@@ -860,6 +879,63 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             view?.isEnabled = enabled
             view?.alpha = if (enabled) 1f else 0.45f
         }
+    }
+
+    /** 一个标签的视图组：文字 + 下划线指示器。 */
+    private class TabView(val root: LinearLayout, val label: TextView, val indicator: View)
+
+    /** 构建单个顶部标签。 */
+    private fun buildTab(text: String): TabView {
+        val root = LinearLayout(this)
+        root.orientation = LinearLayout.VERTICAL
+        root.isClickable = true
+        root.isFocusable = true
+        root.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        // 点击区域加高，便于点按
+        root.setPadding(dp(4), dp(10), dp(4), dp(6))
+
+        val label = TextView(this)
+        label.text = text
+        label.textSize = 16f
+        label.gravity = android.view.Gravity.CENTER
+        root.addView(label)
+
+        val indicator = View(this)
+        val indent = dp(14)
+        indicator.layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, dp(3)
+        ).apply { setMargins(indent, dp(6), indent, 0) }
+        indicator.setBackgroundColor(0x00000000)
+        root.addView(indicator)
+
+        return TabView(root, label, indicator)
+    }
+
+    /** 切换标签选中态：文字加粗 + 显示下划线。 */
+    private fun setTabSelected(tab: TabView, selected: Boolean) {
+        tab.label.setTextColor(if (selected) activeTabColor() else inactiveTabColor())
+        tab.label.setTypeface(null, if (selected) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        tab.indicator.setBackgroundColor(if (selected) activeTabColor() else 0x00000000)
+    }
+
+    /** 选中标签的颜色：跟随主题的强调色，深浅色模式下都清晰。 */
+    private fun activeTabColor(): Int = resolveThemeColor(
+        android.R.attr.colorAccent, 0xFF0078D7.toInt()
+    )
+
+    /** 未选中标签的颜色：次要文字色。 */
+    private fun inactiveTabColor(): Int = resolveThemeColor(
+        android.R.attr.textColorSecondary, 0xFF666666.toInt()
+    )
+
+    /** 解析主题属性颜色。 */
+    private fun resolveThemeColor(attr: Int, fallback: Int): Int = try {
+        val typed = obtainStyledAttributes(intArrayOf(attr))
+        val value = typed.getColor(0, fallback)
+        typed.recycle()
+        value
+    } catch (_: Throwable) {
+        fallback
     }
 
     // ---------- 上下班提醒：时段列表 ----------
@@ -1625,7 +1701,5 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
     companion object {
         private const val REQUEST_PICK_CHIME = 21
-        /** 选中标签的高亮底色（半透明蓝，深浅色模式下都可见）。 */
-        private const val TAB_ACTIVE_COLOR = 0x330078D7
     }
 }

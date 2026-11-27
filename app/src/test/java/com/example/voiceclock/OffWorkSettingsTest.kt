@@ -40,7 +40,7 @@ class OffWorkSettingsTest {
         val settings = OffWorkSettings(
             enabled = true,
             ranges = listOf(TimeRange(9, 0, 12, 0, advanceStartMinutes = 10, advanceEndMinutes = 5,
-                remindBeforeStart = true, remindOnStart = true)),
+                remindWorkStart = true, remindBeforeStart = true, remindOnStart = true)),
             weekdays = setOf(1, 2, 3, 4, 5)
         )
         val now = date("2026-11-27T07:00:00")
@@ -54,7 +54,8 @@ class OffWorkSettingsTest {
     @Test fun advanceReminderUsesConfiguredMinutes() {
         val settings = OffWorkSettings(
             enabled = true,
-            ranges = listOf(TimeRange(9, 0, 18, 0, advanceStartMinutes = 20, remindBeforeStart = true)),
+            ranges = listOf(TimeRange(9, 0, 18, 0, advanceStartMinutes = 20,
+                remindWorkStart = true, remindBeforeStart = true)),
             weekdays = setOf(1, 2, 3, 4, 5)
         )
         val now = date("2026-11-27T07:00:00")

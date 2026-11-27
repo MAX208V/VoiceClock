@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!--
-      浅色主题。使用 DayNight 变体后，系统切换深色模式时会自动
-      走到 values-night/themes.xml，无需重启应用。
+      浅色主题。
+      框架没有 DeviceDefault.DayNight，因此用 Material.Light 作为浅色基准，
+      再由 values-night/themes.xml 覆盖成深色版本，实现跟随系统明暗切换。
     -->
-    <style name="AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight.NoActionBar">
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/surface</item>
-        <!-- 波形图配色 -->
         <item name="waveColor">@color/wave_wave</item>
         <item name="waveProgressColor">@color/wave_progress</item>
         <item name="waveBackColor">@color/wave_back</item>

@@ -1,0 +1,42 @@
+Starting a Gradle Daemon (subsequent builds will be faster)
+> Task :app:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preDebugBuild UP-TO-DATE
+> Task :app:generateDebugBuildConfig
+> Task :app:generateDebugResValues
+> Task :app:checkDebugAarMetadata
+> Task :app:mapDebugSourceSetPaths
+> Task :app:generateDebugResources
+> Task :app:packageDebugResources
+> Task :app:mergeDebugResources
+> Task :app:createDebugCompatibleScreenManifests
+> Task :app:extractDeepLinksDebug
+> Task :app:parseDebugLocalResources
+> Task :app:processDebugMainManifest
+> Task :app:processDebugManifest
+> Task :app:preDebugUnitTestBuild UP-TO-DATE
+> Task :app:processDebugManifestForPackage
+> Task :app:javaPreCompileDebug
+> Task :app:javaPreCompileDebugUnitTest
+> Task :app:processDebugResources
+
+> Task :app:compileDebugKotlin
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/HistoryActivity.kt:32:88 'val systemWindowInsetTop: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/HistoryActivity.kt:32:120 'val systemWindowInsetBottom: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/LocationHelper.kt:81:21 'fun requestSingleUpdate(p0: String, p1: LocationListener, p2: Looper?): Unit' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/MainActivity.kt:565:39 'val systemWindowInsetTop: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/MainActivity.kt:565:71 'val systemWindowInsetBottom: Int' is deprecated. Deprecated in Java.
+w: file:///home/runner/work/VoiceClock/VoiceClock/app/src/main/java/com/example/voiceclock/MainActivity.kt:691:35 'fun <T : Parcelable!> getParcelableExtra(p0: String!): T?' is deprecated. Deprecated in Java.
+
+> Task :app:compileDebugJavaWithJavac
+> Task :app:bundleDebugClassesToCompileJar
+> Task :app:bundleDebugClassesToRuntimeJar
+> Task :app:processDebugJavaRes
+> Task :app:compileDebugUnitTestKotlin
+> Task :app:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processDebugUnitTestJavaRes
+> Task :app:testDebugUnitTest
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/tests-1795878994599.json
+
+BUILD SUCCESSFUL in 34s
+24 actionable tasks: 24 executed

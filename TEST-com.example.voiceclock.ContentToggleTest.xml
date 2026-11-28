@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.ContentToggleTest" tests="14" skipped="0" failures="0" errors="0" timestamp="2026-11-28T15:17:03" hostname="runnervm3lb7s" time="0.006">
+  <properties/>
+  <testcase name="speakClockOnlyWithoutPeriod" classname="com.example.voiceclock.ContentToggleTest" time="0.001"/>
+  <testcase name="bothMasterSwitchesOffLeavesOnlySolarTerm" classname="com.example.voiceclock.ContentToggleTest" time="0.001"/>
+  <testcase name="speakClockOnlyWithoutDateAndWeekday" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="timeMasterSwitchOnKeepsDetailBehavior" classname="com.example.voiceclock.ContentToggleTest" time="0.001"/>
+  <testcase name="selectedMsConvertsToSavedSeconds" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="timeMasterSwitchOffSilencesWholeTimeBlock" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="timeMasterSwitchOffDoesNotAffectWeather" classname="com.example.voiceclock.ContentToggleTest" time="0.001"/>
+  <testcase name="weatherTemperatureOnly" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="weatherMasterSwitchOffSilencesWholeWeatherBlock" classname="com.example.voiceclock.ContentToggleTest" time="0.001"/>
+  <testcase name="allWeatherDisabledProducesNull" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="allTimeDisabledProducesNull" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="savedSecondsRestoresCutPosition" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="minPlayMillisIsHalfSecond" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <testcase name="weatherTemperatureOnlyWithPlace" classname="com.example.voiceclock.ContentToggleTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

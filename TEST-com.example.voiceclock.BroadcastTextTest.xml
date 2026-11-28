@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.BroadcastTextTest" tests="18" skipped="0" failures="0" errors="0" timestamp="2026-11-28T15:17:03" hostname="runnervm3lb7s" time="0.363">
+  <properties/>
+  <testcase name="weatherSkipsApparentWhenSameAsTemperature" classname="com.example.voiceclock.BroadcastTextTest" time="0.027"/>
+  <testcase name="timeAllEnabled" classname="com.example.voiceclock.BroadcastTextTest" time="0.313"/>
+  <testcase name="clockOnlySkipsDateAndWeekday" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="zeroMinuteReadsAsZheng" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="weatherTemperatureOnly" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="buildJoinsAllSectionsWithFullStop" classname="com.example.voiceclock.BroadcastTextTest" time="0.003"/>
+  <testcase name="shortTimeIsCompact" classname="com.example.voiceclock.BroadcastTextTest" time="0.004"/>
+  <testcase name="weatherConditionOnly" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="simpleWeatherSentenceWrapsText" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="weatherNullReturnsNull" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="buildSkipsBlankSections" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="clockOnlyWithoutPeriodUses24Hour" classname="com.example.voiceclock.BroadcastTextTest" time="0.002"/>
+  <testcase name="weatherWeatherDisabledEntirely" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="periodOfCoversAllDayParts" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="dateAndWeekdayOnlyWithoutClock" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <testcase name="weatherAllFieldsWithPlace" classname="com.example.voiceclock.BroadcastTextTest" time="0.004"/>
+  <testcase name="buildDoesNotDuplicateFullStop" classname="com.example.voiceclock.BroadcastTextTest" time="0.0"/>
+  <testcase name="allTimePartsDisabledReturnsNull" classname="com.example.voiceclock.BroadcastTextTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

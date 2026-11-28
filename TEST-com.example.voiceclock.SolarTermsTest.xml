@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.SolarTermsTest" tests="10" skipped="0" failures="0" errors="0" timestamp="2026-11-28T15:17:03" hostname="runnervm3lb7s" time="0.065">
+  <properties/>
+  <testcase name="todayIsReportedOnTheTermDay" classname="com.example.voiceclock.SolarTermsTest" time="0.026"/>
+  <testcase name="convertsUtcToShanghaiCorrectly" classname="com.example.voiceclock.SolarTermsTest" time="0.0"/>
+  <testcase name="crossYearBoundaryFindsNextTerm" classname="com.example.voiceclock.SolarTermsTest" time="0.005"/>
+  <testcase name="matchesUsnoFor2026" classname="com.example.voiceclock.SolarTermsTest" time="0.01"/>
+  <testcase name="matchesUsnoFor2027" classname="com.example.voiceclock.SolarTermsTest" time="0.001"/>
+  <testcase name="distanceIsReportedOtherwise" classname="com.example.voiceclock.SolarTermsTest" time="0.001"/>
+  <testcase name="afternoonTermKeepsSameDayInShanghai" classname="com.example.voiceclock.SolarTermsTest" time="0.0"/>
+  <testcase name="tomorrowIsReportedForTheDayBefore" classname="com.example.voiceclock.SolarTermsTest" time="0.001"/>
+  <testcase name="allTermsAreInChronologicalOrderAndReasonablySpaced" classname="com.example.voiceclock.SolarTermsTest" time="0.02"/>
+  <testcase name="namesAreOrderedFromLesserCold" classname="com.example.voiceclock.SolarTermsTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

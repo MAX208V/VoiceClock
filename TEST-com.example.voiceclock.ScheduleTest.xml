@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.ScheduleTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-11-28T15:17:03" hostname="runnervm3lb7s" time="0.035">
+  <properties/>
+  <testcase name="overnightBelongsToStartingDay" classname="com.example.voiceclock.ScheduleTest" time="0.002"/>
+  <testcase name="selectedDaysAndEndBoundary" classname="com.example.voiceclock.ScheduleTest" time="0.001"/>
+  <testcase name="findsNextWeekAndRejectsImpossibleSchedule" classname="com.example.voiceclock.ScheduleTest" time="0.029"/>
+  <testcase name="modesAlignWithClock" classname="com.example.voiceclock.ScheduleTest" time="0.001"/>
+  <testcase name="intervalPreservesStartSecondsAndSkipsClosedSlots" classname="com.example.voiceclock.ScheduleTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

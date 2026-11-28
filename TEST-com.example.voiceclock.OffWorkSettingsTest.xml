@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.example.voiceclock.OffWorkSettingsTest" tests="33" skipped="0" failures="0" errors="0" timestamp="2026-11-28T15:17:03" hostname="runnervm3lb7s" time="0.057">
+  <properties/>
+  <testcase name="advanceMinutesAreClampedToUpperBound" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="vibrateDefaults" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.015"/>
+  <testcase name="morningShiftProducesAllReminders" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.016"/>
+  <testcase name="beforeBreakText" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="masterSwitchOffYieldsNothing" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="arbitraryAdvanceMinutesAreHonoured" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="hasCustomBreakFlag" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="beforeBreakWhenLastRangeProducesNothing" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="reminderTexts" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="customBreakOverridesNaturalGap" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="crossesMidnightShift" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="singleShiftHasNoBreak" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="fridayEveningSkipsWeekend" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="emptyWeekdaysNeverFires" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="disabledRangeIsIgnored" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="remindersAreSortedAndUnique" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.002"/>
+  <testcase name="pastRemindersAreFilteredOut" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="labelFormatting" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="decodeOldFormatUsesDefaults" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="workEndMasterOffBlocksEndReminders" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="workStartMasterOffBlocksStartReminders" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="encodeDecodeKeepsBeforeBreakFields" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="workStartMasterOnWithDetailsOffStillSilent" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="weekendOnlySchedule" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="lastShiftEndsWithOnEndInsteadOfBreakStart" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="encodeDecodeRoundTrip" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="beforeBreakUsesNaturalGapStart" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="onStartReminderIsOffByDefault" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="disablingAllRemindersYieldsNothing" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="beforeBreakUsesCustomBreakStart" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="advanceReminderUsesConfiguredMinutes" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <testcase name="breakRemindersCanBeDisabledIndependently" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.001"/>
+  <testcase name="gapBetweenShiftsBecomesBreak" classname="com.example.voiceclock.OffWorkSettingsTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

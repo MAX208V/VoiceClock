@@ -303,27 +303,36 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         addLabel(offWorkDetail, "生效星期（所有时段共用）", 15f)
         val offWorkDayNames = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-        val offWorkWeekContainer = LinearLayout(this)
-        offWorkWeekContainer.orientation = LinearLayout.HORIZONTAL
-        for (i in 1..7) {
-            val cb = CheckBox(this)
-            cb.text = offWorkDayNames[i - 1]
-            cb.isChecked = OffWorkSettingsStorage.load(this).weekdays.contains(i)
-            cb.setOnCheckedChangeListener { view, checked ->
-                val cur = OffWorkSettingsStorage.load(this@MainActivity)
-                val newSet = if (checked) cur.weekdays + i else cur.weekdays - i
-                if (newSet.isEmpty()) {
-                    (view as CheckBox).isChecked = true
-                    statusView?.text = "至少要选一天，否则提醒不会触发"
-                    return@setOnCheckedChangeListener
+        // 7 个复选框排成一行会被挤出屏幕（周六、周日看不到），
+        // 改为每行 4 个自动换行，与报时页星期选择保持一致。
+        var offWorkDayIndex = 0
+        while (offWorkDayIndex < offWorkDayNames.size) {
+            val dayRow = LinearLayout(this)
+            dayRow.orientation = LinearLayout.HORIZONTAL
+            var column = 0
+            while (column < 4 && offWorkDayIndex < offWorkDayNames.size) {
+                val day = offWorkDayIndex + 1
+                val cb = CheckBox(this)
+                cb.text = offWorkDayNames[offWorkDayIndex]
+                cb.isChecked = OffWorkSettingsStorage.load(this).weekdays.contains(day)
+                cb.setOnCheckedChangeListener { view, checked ->
+                    val cur = OffWorkSettingsStorage.load(this@MainActivity)
+                    val newSet = if (checked) cur.weekdays + day else cur.weekdays - day
+                    if (newSet.isEmpty()) {
+                        (view as CheckBox).isChecked = true
+                        statusView?.text = "至少要选一天，否则提醒不会触发"
+                        return@setOnCheckedChangeListener
+                    }
+                    OffWorkSettingsStorage.save(this@MainActivity, cur.copy(weekdays = newSet))
+                    onSettingChanged()
                 }
-                OffWorkSettingsStorage.save(this@MainActivity, cur.copy(weekdays = newSet))
-                onSettingChanged()
+                offWorkDayChecks.add(cb)
+                dayRow.addView(cb, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                offWorkDayIndex++
+                column++
             }
-            offWorkDayChecks.add(cb)
-            offWorkWeekContainer.addView(cb)
+            offWorkDetail.addView(dayRow)
         }
-        offWorkDetail.addView(offWorkWeekContainer)
 
         addLabel(offWorkDetail, "默认振动；关闭「播报时振动」后只播报不振动。", 13f)
         offWorkOnlyHeadsetSwitch = makeSwitch(

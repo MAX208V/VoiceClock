@@ -1004,15 +1004,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 updateRange(index) { it.copy(startHour = h, startMinute = m) }
             }, range.startHour, range.startMinute, true).show()
         }
+        val startAdvanceHolder = LinearLayout(this)
+        startAdvanceHolder.orientation = LinearLayout.VERTICAL
+        startAdvanceHolder.visibility = if (range.remindBeforeStart) View.VISIBLE else View.GONE
+        startAdvanceHolder.addView(advanceInput(
+            label = "提前",
+            value = range.advanceStartMinutes
+        ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceStartMinutes = minutes) } })
         startDetail.addView(reminderCheck("上班前提醒", range.remindBeforeStart) { checked ->
-            updateRange(index) { it.copy(remindBeforeStart = checked) }
+            startAdvanceHolder.visibility = if (checked) View.VISIBLE else View.GONE
+            updateRange(index, rebuild = false) { it.copy(remindBeforeStart = checked) }
         })
-        if (range.remindBeforeStart) {
-            startDetail.addView(advanceInput(
-                label = "提前",
-                value = range.advanceStartMinutes
-            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceStartMinutes = minutes) } })
-        }
+        startDetail.addView(startAdvanceHolder)
         startDetail.addView(reminderCheck("上班到点提醒", range.remindOnStart) { checked ->
             updateRange(index) { it.copy(remindOnStart = checked) }
         })
@@ -1041,15 +1044,18 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
                 updateRange(index) { it.copy(endHour = h, endMinute = m) }
             }, range.endHour, range.endMinute, true).show()
         }
+        val endAdvanceHolder = LinearLayout(this)
+        endAdvanceHolder.orientation = LinearLayout.VERTICAL
+        endAdvanceHolder.visibility = if (range.remindBeforeEnd) View.VISIBLE else View.GONE
+        endAdvanceHolder.addView(advanceInput(
+            label = "提前",
+            value = range.advanceEndMinutes
+        ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceEndMinutes = minutes) } })
         endDetail.addView(reminderCheck("下班前提醒", range.remindBeforeEnd) { checked ->
-            updateRange(index) { it.copy(remindBeforeEnd = checked) }
+            endAdvanceHolder.visibility = if (checked) View.VISIBLE else View.GONE
+            updateRange(index, rebuild = false) { it.copy(remindBeforeEnd = checked) }
         })
-        if (range.remindBeforeEnd) {
-            endDetail.addView(advanceInput(
-                label = "提前",
-                value = range.advanceEndMinutes
-            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceEndMinutes = minutes) } })
-        }
+        endDetail.addView(endAdvanceHolder)
         endDetail.addView(reminderCheck("下班到点提醒", range.remindOnEnd) { checked ->
             updateRange(index) { it.copy(remindOnEnd = checked) }
         })
@@ -1071,15 +1077,24 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
         breakDetail.orientation = LinearLayout.VERTICAL
         breakDetail.visibility = if (breakMaster.isChecked) View.VISIBLE else View.GONE
 
-        breakDetail.addView(reminderCheck("休息前提醒", range.remindBeforeBreak) { checked ->
-            updateRange(index) { it.copy(remindBeforeBreak = checked) }
-        })
-        if (range.remindBeforeBreak) {
-            breakDetail.addView(advanceInput(
-                label = "提前",
-                value = range.advanceBreakMinutes
-            ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceBreakMinutes = minutes) } })
+        // 休息前提醒：输入框常驻构建，仅切换可见性。
+        // 之前依赖「勾选后整行重建」才添加输入框，一旦重建没发生就看不到输入框，
+        // 改为即时显隐，行为更确定。
+        val breakAdvanceHolder = LinearLayout(this)
+        breakAdvanceHolder.orientation = LinearLayout.VERTICAL
+        breakAdvanceHolder.visibility = if (range.remindBeforeBreak) View.VISIBLE else View.GONE
+        breakAdvanceHolder.addView(advanceInput(
+            label = "提前",
+            value = range.advanceBreakMinutes
+        ) { minutes -> updateRange(index, rebuild = false) { it.copy(advanceBreakMinutes = minutes) } })
+
+        val beforeBreakCheck = reminderCheck("休息前提醒", range.remindBeforeBreak) { checked ->
+            // 先即时显示/隐藏输入框，再落盘，用户立刻能看到反馈
+            breakAdvanceHolder.visibility = if (checked) View.VISIBLE else View.GONE
+            updateRange(index, rebuild = false) { it.copy(remindBeforeBreak = checked) }
         }
+        breakDetail.addView(beforeBreakCheck)
+        breakDetail.addView(breakAdvanceHolder)
         breakDetail.addView(reminderCheck("休息开始提醒", range.remindBreakStart) { checked ->
             updateRange(index) { it.copy(remindBreakStart = checked) }
         })
@@ -1141,6 +1156,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
      * 避免每敲一个字符就触发一次 schedule()。
      */
     private fun advanceInput(label: String, value: Int, onChange: (Int) -> Unit): View {
+        var initializing = false
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
         row.gravity = android.view.Gravity.CENTER_VERTICAL
@@ -1151,7 +1167,11 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
 
         val input = EditText(this)
         input.inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        // 用程序设值会触发 afterTextChanged，先标记为「初始化中」，
+        // 避免刚建好就回写一次、干扰用户输入。
+        initializing = true
         input.setText(value.toString())
+        initializing = false
         input.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         row.addView(input)
 
@@ -1171,6 +1191,7 @@ class MainActivity : Activity(), TextToSpeech.OnInitListener {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) = Unit
             override fun afterTextChanged(s: Editable?) {
+                if (initializing) return
                 pending?.let { mainHandler.removeCallbacks(it) }
                 val task = Runnable { commit(s?.toString()) }
                 pending = task
